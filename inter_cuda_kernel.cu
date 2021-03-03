@@ -636,21 +636,59 @@ __device__ static void cuda_high_build_mc_border(const uint8_t* src8, int src_st
 	} while (--b_h);
 }
 
-__device__ static void cuda_highbd_inter_predictor(const uint16_t* src, int src_stride, uint16_t* dst, int dst_stride,
-	const int subpel_x, const int subpel_y, const struct scale_factors* sf,
-	int w, int h, int ref, const InterpKernel* kernel, int xs, int ys, int bd)
+__device__ static void cuda_highbd_inter_predictor_comp(const uint16_t* src, int src_stride, uint16_t* dst, int dst_stride,
+	const int subpel_x, const int subpel_y, int w, int h, const InterpKernel* kernel, int xs, int ys, int bd)
 {
-	sf->highbd_predict[(subpel_x != 0)][(subpel_y != 0)][ref](src, src_stride, dst, dst_stride, kernel, subpel_x, xs, subpel_y, ys, w, h, bd);
+#if CONFIG_VP9_HIGHBITDEPTH
+	cuda_vpx_highbd_convolve8_avg_c(src, src_stride, dst, dst_stride, kernel, subpel_x, xs, subpel_y, ys, w, h, bd);
+#else
+#endif
 }
 
-__device__ static void cuda_extend_and_predict(const uint8_t* buf_ptr1, int pre_buf_stride, int x0, int y0, int b_w,
-			int b_h, int frame_width, int frame_height, int border_offset, uint8_t* const dst, int dst_buf_stride, int subpel_x, int subpel_y,
-			const InterpKernel* kernel, const struct scale_factors* sf, int bd, int w, int h, int ref, int xs, int ys) {
+__device__ static void cuda_highbd_inter_predictor_copy(const uint16_t* src, int src_stride, uint16_t* dst, int dst_stride,
+	const int subpel_x, const int subpel_y, int w, int h, const InterpKernel* kernel, int xs, int ys, int bd)
+{
+#if CONFIG_VP9_HIGHBITDEPTH
+	cuda_vpx_highbd_convolve_copy_c(src, src_stride, dst, dst_stride, kernel, subpel_x, xs, subpel_y, ys, w, h, bd);
+#else
+#endif
+}
+
+__device__ static void cuda_highbd_inter_predictor_vert(const uint16_t* src, int src_stride, uint16_t* dst, int dst_stride,
+	const int subpel_x, const int subpel_y, int w, int h, const InterpKernel* kernel, int xs, int ys, int bd)
+{
+#if CONFIG_VP9_HIGHBITDEPTH
+	cuda_vpx_highbd_convolve8_vert_c(src, src_stride, dst, dst_stride, kernel, subpel_x, xs, subpel_y, ys, w, h, bd);
+#else
+#endif
+}
+
+__device__ static void cuda_highbd_inter_predictor_horiz(const uint16_t* src, int src_stride, uint16_t* dst, int dst_stride,
+	const int subpel_x, const int subpel_y, int w, int h, const InterpKernel* kernel, int xs, int ys, int bd)
+{
+#if CONFIG_VP9_HIGHBITDEPTH
+	cuda_vpx_highbd_convolve8_horiz_c(src, src_stride, dst, dst_stride, kernel, subpel_x, xs, subpel_y, ys, w, h, bd);
+#else
+#endif
+}
+
+__device__ static void cuda_highbd_inter_predictor_both(const uint16_t* src, int src_stride, uint16_t* dst, int dst_stride,
+	const int subpel_x, const int subpel_y, int w, int h, const InterpKernel* kernel, int xs, int ys, int bd)
+{
+#if CONFIG_VP9_HIGHBITDEPTH
+	cuda_vpx_highbd_convolve8_c(src, src_stride, dst, dst_stride, kernel, subpel_x, xs, subpel_y, ys, w, h, bd);
+#else
+#endif
+}
+
+__device__ static void cuda_extend_and_predict_comp(const uint8_t* buf_ptr1, int pre_buf_stride, int x0, int y0, int b_w,
+	int b_h, int frame_width, int frame_height, int border_offset, uint8_t* const dst, int dst_buf_stride, int subpel_x, int subpel_y,
+	const InterpKernel* kernel, int bd, int w, int h, int xs, int ys) {
 #if CONFIG_VP9_HIGHBITDEPTH
 	DECLARE_ALIGNED(16, uint16_t, mc_buf_high[80 * 2 * 80 * 2]);
 	cuda_high_build_mc_border(buf_ptr1, pre_buf_stride, mc_buf_high, b_w, x0, y0, b_w, b_h, frame_width, frame_height);
-	cuda_highbd_inter_predictor(mc_buf_high + border_offset, b_w, CONVERT_TO_SHORTPTR(dst), dst_buf_stride, subpel_x,
-		subpel_y, sf, w, h, ref, kernel, xs, ys, bd);
+	cuda_highbd_inter_predictor_comp(mc_buf_high + border_offset, b_w, CONVERT_TO_SHORTPTR(dst), dst_buf_stride, subpel_x,
+		subpel_y, w, h, kernel, xs, ys, bd);
 #else
 	DECLARE_ALIGNED(16, uint8_t, mc_buf_high[80 * 2 * 80 * 2]);
 	cuda_high_build_mc_border(buf_ptr1, pre_buf_stride, mc_buf_high, b_w, x0, y0, b_w, b_h, frame_width, frame_height);
@@ -659,15 +697,78 @@ __device__ static void cuda_extend_and_predict(const uint8_t* buf_ptr1, int pre_
 #endif
 }
 
-__device__ static void cuda_dec_build_inter_predictors(int t_subsampling_x,
-		int t_subsampling_y, int mb_to_top_edge, int mb_to_left_edge, int bit_depth, int x, int y, int w, int h,
-		const InterpKernel* kernel, const struct scale_factors* sf, int buf_stride, uint8_t* dst_buf, const MV* mv,
-		uint8_t* ref_frame, int frame_width, int frame_height, int ref) {
+__device__ static void cuda_extend_and_predict_copy(const uint8_t* buf_ptr1, int pre_buf_stride, int x0, int y0, int b_w,
+	int b_h, int frame_width, int frame_height, int border_offset, uint8_t* const dst, int dst_buf_stride, int subpel_x, int subpel_y,
+	const InterpKernel* kernel, int bd, int w, int h, int xs, int ys) {
+#if CONFIG_VP9_HIGHBITDEPTH
+	DECLARE_ALIGNED(16, uint16_t, mc_buf_high[80 * 2 * 80 * 2]);
+	cuda_high_build_mc_border(buf_ptr1, pre_buf_stride, mc_buf_high, b_w, x0, y0, b_w, b_h, frame_width, frame_height);
+	cuda_highbd_inter_predictor_copy(mc_buf_high + border_offset, b_w, CONVERT_TO_SHORTPTR(dst), dst_buf_stride, subpel_x,
+		subpel_y, w, h, kernel, xs, ys, bd);
+#else
+	DECLARE_ALIGNED(16, uint8_t, mc_buf_high[80 * 2 * 80 * 2]);
+	cuda_high_build_mc_border(buf_ptr1, pre_buf_stride, mc_buf_high, b_w, x0, y0, b_w, b_h, frame_width, frame_height);
+	cuda_highbd_inter_predictor(mc_buf_high + border_offset, b_w, dst, dst_buf_stride, subpel_x,
+		subpel_y, sf, w, h, ref, kernel, xs, ys, bd);
+#endif
+}
+
+__device__ static void cuda_extend_and_predict_vert(const uint8_t* buf_ptr1, int pre_buf_stride, int x0, int y0, int b_w,
+	int b_h, int frame_width, int frame_height, int border_offset, uint8_t* const dst, int dst_buf_stride, int subpel_x, int subpel_y,
+	const InterpKernel* kernel, int bd, int w, int h, int xs, int ys) {
+#if CONFIG_VP9_HIGHBITDEPTH
+	DECLARE_ALIGNED(16, uint16_t, mc_buf_high[80 * 2 * 80 * 2]);
+	cuda_high_build_mc_border(buf_ptr1, pre_buf_stride, mc_buf_high, b_w, x0, y0, b_w, b_h, frame_width, frame_height);
+	cuda_highbd_inter_predictor_vert(mc_buf_high + border_offset, b_w, CONVERT_TO_SHORTPTR(dst), dst_buf_stride, subpel_x,
+		subpel_y, w, h, kernel, xs, ys, bd);
+#else
+	DECLARE_ALIGNED(16, uint8_t, mc_buf_high[80 * 2 * 80 * 2]);
+	cuda_high_build_mc_border(buf_ptr1, pre_buf_stride, mc_buf_high, b_w, x0, y0, b_w, b_h, frame_width, frame_height);
+	cuda_highbd_inter_predictor(mc_buf_high + border_offset, b_w, dst, dst_buf_stride, subpel_x,
+		subpel_y, sf, w, h, ref, kernel, xs, ys, bd);
+#endif
+}
+
+__device__ static void cuda_extend_and_predict_horiz(const uint8_t* buf_ptr1, int pre_buf_stride, int x0, int y0, int b_w,
+	int b_h, int frame_width, int frame_height, int border_offset, uint8_t* const dst, int dst_buf_stride, int subpel_x, int subpel_y,
+	const InterpKernel* kernel, int bd, int w, int h, int xs, int ys) {
+#if CONFIG_VP9_HIGHBITDEPTH
+	DECLARE_ALIGNED(16, uint16_t, mc_buf_high[80 * 2 * 80 * 2]);
+	cuda_high_build_mc_border(buf_ptr1, pre_buf_stride, mc_buf_high, b_w, x0, y0, b_w, b_h, frame_width, frame_height);
+	cuda_highbd_inter_predictor_horiz(mc_buf_high + border_offset, b_w, CONVERT_TO_SHORTPTR(dst), dst_buf_stride, subpel_x,
+		subpel_y, w, h, kernel, xs, ys, bd);
+#else
+	DECLARE_ALIGNED(16, uint8_t, mc_buf_high[80 * 2 * 80 * 2]);
+	cuda_high_build_mc_border(buf_ptr1, pre_buf_stride, mc_buf_high, b_w, x0, y0, b_w, b_h, frame_width, frame_height);
+	cuda_highbd_inter_predictor(mc_buf_high + border_offset, b_w, dst, dst_buf_stride, subpel_x,
+		subpel_y, sf, w, h, ref, kernel, xs, ys, bd);
+#endif
+}
+
+__device__ static void cuda_extend_and_predict_both(const uint8_t* buf_ptr1, int pre_buf_stride, int x0, int y0, int b_w,
+	int b_h, int frame_width, int frame_height, int border_offset, uint8_t* const dst, int dst_buf_stride, int subpel_x, int subpel_y,
+	const InterpKernel* kernel, int bd, int w, int h, int xs, int ys) {
+#if CONFIG_VP9_HIGHBITDEPTH
+	DECLARE_ALIGNED(16, uint16_t, mc_buf_high[80 * 2 * 80 * 2]);
+	cuda_high_build_mc_border(buf_ptr1, pre_buf_stride, mc_buf_high, b_w, x0, y0, b_w, b_h, frame_width, frame_height);
+	cuda_highbd_inter_predictor_both(mc_buf_high + border_offset, b_w, CONVERT_TO_SHORTPTR(dst), dst_buf_stride, subpel_x,
+		subpel_y, w, h, kernel, xs, ys, bd);
+#else
+	DECLARE_ALIGNED(16, uint8_t, mc_buf_high[80 * 2 * 80 * 2]);
+	cuda_high_build_mc_border(buf_ptr1, pre_buf_stride, mc_buf_high, b_w, x0, y0, b_w, b_h, frame_width, frame_height);
+	cuda_highbd_inter_predictor(mc_buf_high + border_offset, b_w, dst, dst_buf_stride, subpel_x,
+		subpel_y, sf, w, h, ref, kernel, xs, ys, bd);
+#endif
+}
+
+__device__ static void cuda_dec_build_inter_predictors_comp(int t_subsampling_x, int t_subsampling_y, int mb_to_top_edge, 
+	int mb_to_left_edge, int bit_depth, int x, int y, int w, int h, const InterpKernel* kernel, const struct scale_factors* sf,
+	int buf_stride, uint8_t* dst_buf, const MV* mv, uint8_t* ref_frame, int frame_width, int frame_height) {
 	uint8_t* const dst = dst_buf + buf_stride * y + x;
 	MV32 scaled_mv;
 	int xs, ys, x0, y0, x0_16, y0_16, subpel_x, subpel_y;
 	uint8_t* buf_ptr;
-	
+
 	// Co-ordinate of containing block to pixel precision.
 	x0 = (-mb_to_left_edge >> (3 + t_subsampling_x)) + x;
 	y0 = (-mb_to_top_edge >> (3 + t_subsampling_y)) + y;
@@ -679,7 +780,7 @@ __device__ static void cuda_dec_build_inter_predictors(int t_subsampling_x,
 	scaled_mv.row = mv->row * (1 << (1 - t_subsampling_y));
 	scaled_mv.col = mv->col * (1 << (1 - t_subsampling_x));
 	xs = ys = 16;
-	
+
 	subpel_x = scaled_mv.col & SUBPEL_MASK;
 	subpel_y = scaled_mv.row & SUBPEL_MASK;
 
@@ -724,27 +825,355 @@ __device__ static void cuda_dec_build_inter_predictors(int t_subsampling_x,
 			const int b_h = y1 - y0 + 1;
 			const int border_offset = y_pad * 3 * b_w + x_pad * 3;
 
-			cuda_extend_and_predict(buf_ptr1, buf_stride, x0, y0, b_w, b_h, frame_width,
+			cuda_extend_and_predict_comp(buf_ptr1, buf_stride, x0, y0, b_w, b_h, frame_width,
 				frame_height, border_offset, dst, buf_stride,
-				subpel_x, subpel_y, kernel, sf, bit_depth, w, h, ref, xs, ys);
+				subpel_x, subpel_y, kernel, bit_depth, w, h, xs, ys);
 			return;
 		}
 	}
-	
+
 #if CONFIG_VP9_HIGHBITDEPTH
-	cuda_highbd_inter_predictor(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride,
+	cuda_highbd_inter_predictor_comp(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride,
 		CONVERT_TO_SHORTPTR(dst), buf_stride, subpel_x,
-		subpel_y, sf, w, h, ref, kernel, xs, ys, bit_depth);
+		subpel_y, w, h, kernel, xs, ys, bit_depth);
 #else
-	cuda_highbd_inter_predictor(buf_ptr, buf_stride, dst, buf_stride, subpel_x, 
+	cuda_highbd_inter_predictor(buf_ptr, buf_stride, dst, buf_stride, subpel_x,
 		subpel_y, sf, w, h, ref, kernel, xs, ys, bit_depth);
 #endif
 }
 
-__device__ static void cuda_dec_build_inter_predictors_4x4(FrameInformation* fi, int subsampling_x,
-		int subsampling_y, int is_compound, int interp_filter, MV_REFERENCE_FRAME ref_frame[2], uint8_t* alloc,
-		uint8_t* frame_refs[3], struct scale_factors* const sf[3], int16_t my[2], int16_t mx[2], int mi_row, int mi_col, 
-		int plane, int x, int y) {
+__device__ static void cuda_dec_build_inter_predictors_copy(int t_subsampling_x,
+	int t_subsampling_y, int mb_to_top_edge, int mb_to_left_edge, int bit_depth, int x, int y, int w, int h,
+	const InterpKernel* kernel, const struct scale_factors* sf, int buf_stride, uint8_t* dst_buf, const MV* mv,
+	uint8_t* ref_frame, int frame_width, int frame_height) {
+	uint8_t* const dst = dst_buf + buf_stride * y + x;
+	MV32 scaled_mv;
+	int xs, ys, x0, y0, x0_16, y0_16, subpel_x, subpel_y;
+	uint8_t* buf_ptr;
+
+	// Co-ordinate of containing block to pixel precision.
+	x0 = (-mb_to_left_edge >> (3 + t_subsampling_x)) + x;
+	y0 = (-mb_to_top_edge >> (3 + t_subsampling_y)) + y;
+
+	// Co-ordinate of the block to 1/16th pixel precision.
+	x0_16 = x0 << SUBPEL_BITS;
+	y0_16 = y0 << SUBPEL_BITS;
+
+	scaled_mv.row = mv->row * (1 << (1 - t_subsampling_y));
+	scaled_mv.col = mv->col * (1 << (1 - t_subsampling_x));
+	xs = ys = 16;
+
+	subpel_x = scaled_mv.col & SUBPEL_MASK;
+	subpel_y = scaled_mv.row & SUBPEL_MASK;
+
+	// Calculate the top left corner of the best matching block in the
+	// reference frame.
+	x0 += scaled_mv.col >> SUBPEL_BITS;
+	y0 += scaled_mv.row >> SUBPEL_BITS;
+	x0_16 += scaled_mv.col;
+	y0_16 += scaled_mv.row;
+
+	// Get reference block pointer.
+	buf_ptr = ref_frame + y0 * buf_stride + x0;
+
+	// Do border extension if there is motion or the
+	// width/height is not a multiple of 8 pixels.
+	if (scaled_mv.col || scaled_mv.row || (frame_width & 0x7) ||
+		(frame_height & 0x7)) {
+		int y1 = ((y0_16 + (h - 1) * ys) >> SUBPEL_BITS) + 1;
+
+		// Get reference block bottom right horizontal coordinate.
+		int x1 = ((x0_16 + (w - 1) * xs) >> SUBPEL_BITS) + 1;
+		int x_pad = 0, y_pad = 0;
+
+		if (subpel_x || (sf->x_step_q4 != SUBPEL_SHIFTS)) {
+			x0 -= VP9_INTERP_EXTEND - 1;
+			x1 += VP9_INTERP_EXTEND;
+			x_pad = 1;
+		}
+
+		if (subpel_y || (sf->y_step_q4 != SUBPEL_SHIFTS)) {
+			y0 -= VP9_INTERP_EXTEND - 1;
+			y1 += VP9_INTERP_EXTEND;
+			y_pad = 1;
+		}
+
+		// Skip border extension if block is inside the frame.
+		if (x0 < 0 || x0 > frame_width - 1 || x1 < 0 || x1 > frame_width - 1 ||
+			y0 < 0 || y0 > frame_height - 1 || y1 < 0 || y1 > frame_height - 1) {
+			// Extend the border.
+			const uint8_t* const buf_ptr1 = ref_frame + y0 * buf_stride + x0;
+			const int b_w = x1 - x0 + 1;
+			const int b_h = y1 - y0 + 1;
+			const int border_offset = y_pad * 3 * b_w + x_pad * 3;
+
+			cuda_extend_and_predict_copy(buf_ptr1, buf_stride, x0, y0, b_w, b_h, frame_width,
+				frame_height, border_offset, dst, buf_stride,
+				subpel_x, subpel_y, kernel, bit_depth, w, h, xs, ys);
+			return;
+		}
+	}
+
+#if CONFIG_VP9_HIGHBITDEPTH
+	cuda_highbd_inter_predictor_copy(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride,
+		CONVERT_TO_SHORTPTR(dst), buf_stride, subpel_x,
+		subpel_y, w, h, kernel, xs, ys, bit_depth);
+#else
+	cuda_highbd_inter_predictor(buf_ptr, buf_stride, dst, buf_stride, subpel_x,
+		subpel_y, sf, w, h, ref, kernel, xs, ys, bit_depth);
+#endif
+}
+
+__device__ static void cuda_dec_build_inter_predictors_vert(int t_subsampling_x,
+	int t_subsampling_y, int mb_to_top_edge, int mb_to_left_edge, int bit_depth, int x, int y, int w, int h,
+	const InterpKernel* kernel, const struct scale_factors* sf, int buf_stride, uint8_t* dst_buf, const MV* mv,
+	uint8_t* ref_frame, int frame_width, int frame_height) {
+	uint8_t* const dst = dst_buf + buf_stride * y + x;
+	MV32 scaled_mv;
+	int xs, ys, x0, y0, x0_16, y0_16, subpel_x, subpel_y;
+	uint8_t* buf_ptr;
+
+	// Co-ordinate of containing block to pixel precision.
+	x0 = (-mb_to_left_edge >> (3 + t_subsampling_x)) + x;
+	y0 = (-mb_to_top_edge >> (3 + t_subsampling_y)) + y;
+
+	// Co-ordinate of the block to 1/16th pixel precision.
+	x0_16 = x0 << SUBPEL_BITS;
+	y0_16 = y0 << SUBPEL_BITS;
+
+	scaled_mv.row = mv->row * (1 << (1 - t_subsampling_y));
+	scaled_mv.col = mv->col * (1 << (1 - t_subsampling_x));
+	xs = ys = 16;
+
+	subpel_x = scaled_mv.col & SUBPEL_MASK;
+	subpel_y = scaled_mv.row & SUBPEL_MASK;
+
+	// Calculate the top left corner of the best matching block in the
+	// reference frame.
+	x0 += scaled_mv.col >> SUBPEL_BITS;
+	y0 += scaled_mv.row >> SUBPEL_BITS;
+	x0_16 += scaled_mv.col;
+	y0_16 += scaled_mv.row;
+
+	// Get reference block pointer.
+	buf_ptr = ref_frame + y0 * buf_stride + x0;
+
+	// Do border extension if there is motion or the
+	// width/height is not a multiple of 8 pixels.
+	if (scaled_mv.col || scaled_mv.row || (frame_width & 0x7) ||
+		(frame_height & 0x7)) {
+		int y1 = ((y0_16 + (h - 1) * ys) >> SUBPEL_BITS) + 1;
+
+		// Get reference block bottom right horizontal coordinate.
+		int x1 = ((x0_16 + (w - 1) * xs) >> SUBPEL_BITS) + 1;
+		int x_pad = 0, y_pad = 0;
+
+		if (subpel_x || (sf->x_step_q4 != SUBPEL_SHIFTS)) {
+			x0 -= VP9_INTERP_EXTEND - 1;
+			x1 += VP9_INTERP_EXTEND;
+			x_pad = 1;
+		}
+
+		if (subpel_y || (sf->y_step_q4 != SUBPEL_SHIFTS)) {
+			y0 -= VP9_INTERP_EXTEND - 1;
+			y1 += VP9_INTERP_EXTEND;
+			y_pad = 1;
+		}
+
+		// Skip border extension if block is inside the frame.
+		if (x0 < 0 || x0 > frame_width - 1 || x1 < 0 || x1 > frame_width - 1 ||
+			y0 < 0 || y0 > frame_height - 1 || y1 < 0 || y1 > frame_height - 1) {
+			// Extend the border.
+			const uint8_t* const buf_ptr1 = ref_frame + y0 * buf_stride + x0;
+			const int b_w = x1 - x0 + 1;
+			const int b_h = y1 - y0 + 1;
+			const int border_offset = y_pad * 3 * b_w + x_pad * 3;
+
+			cuda_extend_and_predict_vert(buf_ptr1, buf_stride, x0, y0, b_w, b_h, frame_width,
+				frame_height, border_offset, dst, buf_stride,
+				subpel_x, subpel_y, kernel, bit_depth, w, h, xs, ys);
+			return;
+		}
+	}
+
+#if CONFIG_VP9_HIGHBITDEPTH
+	cuda_highbd_inter_predictor_vert(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride,
+		CONVERT_TO_SHORTPTR(dst), buf_stride, subpel_x,
+		subpel_y, w, h, kernel, xs, ys, bit_depth);
+#else
+	cuda_highbd_inter_predictor(buf_ptr, buf_stride, dst, buf_stride, subpel_x,
+		subpel_y, sf, w, h, ref, kernel, xs, ys, bit_depth);
+#endif
+}
+
+__device__ static void cuda_dec_build_inter_predictors_horiz(int t_subsampling_x,
+	int t_subsampling_y, int mb_to_top_edge, int mb_to_left_edge, int bit_depth, int x, int y, int w, int h,
+	const InterpKernel* kernel, const struct scale_factors* sf, int buf_stride, uint8_t* dst_buf, const MV* mv,
+	uint8_t* ref_frame, int frame_width, int frame_height) {
+	uint8_t* const dst = dst_buf + buf_stride * y + x;
+	MV32 scaled_mv;
+	int xs, ys, x0, y0, x0_16, y0_16, subpel_x, subpel_y;
+	uint8_t* buf_ptr;
+
+	// Co-ordinate of containing block to pixel precision.
+	x0 = (-mb_to_left_edge >> (3 + t_subsampling_x)) + x;
+	y0 = (-mb_to_top_edge >> (3 + t_subsampling_y)) + y;
+
+	// Co-ordinate of the block to 1/16th pixel precision.
+	x0_16 = x0 << SUBPEL_BITS;
+	y0_16 = y0 << SUBPEL_BITS;
+
+	scaled_mv.row = mv->row * (1 << (1 - t_subsampling_y));
+	scaled_mv.col = mv->col * (1 << (1 - t_subsampling_x));
+	xs = ys = 16;
+
+	subpel_x = scaled_mv.col & SUBPEL_MASK;
+	subpel_y = scaled_mv.row & SUBPEL_MASK;
+
+	// Calculate the top left corner of the best matching block in the
+	// reference frame.
+	x0 += scaled_mv.col >> SUBPEL_BITS;
+	y0 += scaled_mv.row >> SUBPEL_BITS;
+	x0_16 += scaled_mv.col;
+	y0_16 += scaled_mv.row;
+
+	// Get reference block pointer.
+	buf_ptr = ref_frame + y0 * buf_stride + x0;
+
+	// Do border extension if there is motion or the
+	// width/height is not a multiple of 8 pixels.
+	if (scaled_mv.col || scaled_mv.row || (frame_width & 0x7) ||
+		(frame_height & 0x7)) {
+		int y1 = ((y0_16 + (h - 1) * ys) >> SUBPEL_BITS) + 1;
+
+		// Get reference block bottom right horizontal coordinate.
+		int x1 = ((x0_16 + (w - 1) * xs) >> SUBPEL_BITS) + 1;
+		int x_pad = 0, y_pad = 0;
+
+		if (subpel_x || (sf->x_step_q4 != SUBPEL_SHIFTS)) {
+			x0 -= VP9_INTERP_EXTEND - 1;
+			x1 += VP9_INTERP_EXTEND;
+			x_pad = 1;
+		}
+
+		if (subpel_y || (sf->y_step_q4 != SUBPEL_SHIFTS)) {
+			y0 -= VP9_INTERP_EXTEND - 1;
+			y1 += VP9_INTERP_EXTEND;
+			y_pad = 1;
+		}
+
+		// Skip border extension if block is inside the frame.
+		if (x0 < 0 || x0 > frame_width - 1 || x1 < 0 || x1 > frame_width - 1 ||
+			y0 < 0 || y0 > frame_height - 1 || y1 < 0 || y1 > frame_height - 1) {
+			// Extend the border.
+			const uint8_t* const buf_ptr1 = ref_frame + y0 * buf_stride + x0;
+			const int b_w = x1 - x0 + 1;
+			const int b_h = y1 - y0 + 1;
+			const int border_offset = y_pad * 3 * b_w + x_pad * 3;
+
+			cuda_extend_and_predict_horiz(buf_ptr1, buf_stride, x0, y0, b_w, b_h, frame_width,
+				frame_height, border_offset, dst, buf_stride,
+				subpel_x, subpel_y, kernel, bit_depth, w, h, xs, ys);
+			return;
+		}
+	}
+
+#if CONFIG_VP9_HIGHBITDEPTH
+	cuda_highbd_inter_predictor_horiz(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride,
+		CONVERT_TO_SHORTPTR(dst), buf_stride, subpel_x,
+		subpel_y, w, h, kernel, xs, ys, bit_depth);
+#else
+	cuda_highbd_inter_predictor(buf_ptr, buf_stride, dst, buf_stride, subpel_x,
+		subpel_y, sf, w, h, ref, kernel, xs, ys, bit_depth);
+#endif
+}
+
+__device__ static void cuda_dec_build_inter_predictors_both(int t_subsampling_x,
+	int t_subsampling_y, int mb_to_top_edge, int mb_to_left_edge, int bit_depth, int x, int y, int w, int h,
+	const InterpKernel* kernel, const struct scale_factors* sf, int buf_stride, uint8_t* dst_buf, const MV* mv,
+	uint8_t* ref_frame, int frame_width, int frame_height) {
+	uint8_t* const dst = dst_buf + buf_stride * y + x;
+	MV32 scaled_mv;
+	int xs, ys, x0, y0, x0_16, y0_16, subpel_x, subpel_y;
+	uint8_t* buf_ptr;
+
+	// Co-ordinate of containing block to pixel precision.
+	x0 = (-mb_to_left_edge >> (3 + t_subsampling_x)) + x;
+	y0 = (-mb_to_top_edge >> (3 + t_subsampling_y)) + y;
+
+	// Co-ordinate of the block to 1/16th pixel precision.
+	x0_16 = x0 << SUBPEL_BITS;
+	y0_16 = y0 << SUBPEL_BITS;
+
+	scaled_mv.row = mv->row * (1 << (1 - t_subsampling_y));
+	scaled_mv.col = mv->col * (1 << (1 - t_subsampling_x));
+	xs = ys = 16;
+
+	subpel_x = scaled_mv.col & SUBPEL_MASK;
+	subpel_y = scaled_mv.row & SUBPEL_MASK;
+
+	// Calculate the top left corner of the best matching block in the
+	// reference frame.
+	x0 += scaled_mv.col >> SUBPEL_BITS;
+	y0 += scaled_mv.row >> SUBPEL_BITS;
+	x0_16 += scaled_mv.col;
+	y0_16 += scaled_mv.row;
+
+	// Get reference block pointer.
+	buf_ptr = ref_frame + y0 * buf_stride + x0;
+
+	// Do border extension if there is motion or the
+	// width/height is not a multiple of 8 pixels.
+	if (scaled_mv.col || scaled_mv.row || (frame_width & 0x7) ||
+		(frame_height & 0x7)) {
+		int y1 = ((y0_16 + (h - 1) * ys) >> SUBPEL_BITS) + 1;
+
+		// Get reference block bottom right horizontal coordinate.
+		int x1 = ((x0_16 + (w - 1) * xs) >> SUBPEL_BITS) + 1;
+		int x_pad = 0, y_pad = 0;
+
+		if (subpel_x || (sf->x_step_q4 != SUBPEL_SHIFTS)) {
+			x0 -= VP9_INTERP_EXTEND - 1;
+			x1 += VP9_INTERP_EXTEND;
+			x_pad = 1;
+		}
+
+		if (subpel_y || (sf->y_step_q4 != SUBPEL_SHIFTS)) {
+			y0 -= VP9_INTERP_EXTEND - 1;
+			y1 += VP9_INTERP_EXTEND;
+			y_pad = 1;
+		}
+
+		// Skip border extension if block is inside the frame.
+		if (x0 < 0 || x0 > frame_width - 1 || x1 < 0 || x1 > frame_width - 1 ||
+			y0 < 0 || y0 > frame_height - 1 || y1 < 0 || y1 > frame_height - 1) {
+			// Extend the border.
+			const uint8_t* const buf_ptr1 = ref_frame + y0 * buf_stride + x0;
+			const int b_w = x1 - x0 + 1;
+			const int b_h = y1 - y0 + 1;
+			const int border_offset = y_pad * 3 * b_w + x_pad * 3;
+
+			cuda_extend_and_predict_both(buf_ptr1, buf_stride, x0, y0, b_w, b_h, frame_width,
+				frame_height, border_offset, dst, buf_stride,
+				subpel_x, subpel_y, kernel, bit_depth, w, h, xs, ys);
+			return;
+		}
+	}
+
+#if CONFIG_VP9_HIGHBITDEPTH
+	cuda_highbd_inter_predictor_both(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride,
+		CONVERT_TO_SHORTPTR(dst), buf_stride, subpel_x,
+		subpel_y, w, h, kernel, xs, ys, bit_depth);
+#else
+	cuda_highbd_inter_predictor(buf_ptr, buf_stride, dst, buf_stride, subpel_x,
+		subpel_y, sf, w, h, ref, kernel, xs, ys, bit_depth);
+#endif
+}
+
+__device__ static void cuda_dec_build_inter_predictors_4x4_comp(FrameInformation* fi, int subsampling_x,
+	int subsampling_y, int interp_filter, MV_REFERENCE_FRAME ref_frame, uint8_t* alloc,
+	uint8_t* frame_refs[3], struct scale_factors* const sf[3], int16_t my, int16_t mx, int mi_row, int mi_col,
+	int plane, int x, int y) {
 	int size = 0;
 
 	uint8_t* y_buf = (uint8_t*)yv12_align_addr(alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
@@ -753,100 +1182,363 @@ __device__ static void cuda_dec_build_inter_predictors_4x4(FrameInformation* fi,
 
 	uint8_t* const buffers[MAX_MB_PLANE] = { y_buf, u_buf, v_buf };
 	const int strides[MAX_MB_PLANE] = { fi->y_stride, fi->uv_stride, fi->uv_stride };
-	
+
 	const InterpKernel* kernel = cuda_vp9_filter_kernels[interp_filter];
-	int ref;
 
-	for (ref = 0; ref < 1 + is_compound; ++ref) {
-		int k = ref_frame[ref] - LAST_FRAME;
+	int k = ref_frame - LAST_FRAME;
 
-		uint8_t* ref_alloc = frame_refs[k];
-		uint8_t* ref_y_buf = (uint8_t*)yv12_align_addr(ref_alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
-		uint8_t* ref_u_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
-		uint8_t* ref_v_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + fi->uvplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
-		uint8_t* const ref_buffers[MAX_MB_PLANE] = { ref_y_buf, ref_u_buf, ref_v_buf };
-		
-		const MV mv = { my[size], mx[size] };
-		++size;
-		
-		uint8_t* dst_buf = buffers[plane] + cuda_scaled_buffer_offset((MI_SIZE * mi_col) >> subsampling_x,
-			(MI_SIZE * mi_row) >> subsampling_y, strides[plane], NULL);
-		
-		const int buf_stride = strides[plane];
+	uint8_t* ref_alloc = frame_refs[k];
+	uint8_t* ref_y_buf = (uint8_t*)yv12_align_addr(ref_alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
+	uint8_t* ref_u_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* ref_v_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + fi->uvplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* const ref_buffers[MAX_MB_PLANE] = { ref_y_buf, ref_u_buf, ref_v_buf };
 
-		int frame_width;
-		int frame_height;
-		uint8_t* ref_frame_buf;
+	const MV mv = { my, mx };
 
-		if (plane == 0) {
-			frame_width = fi->y_crop_width;
-			frame_height = fi->y_crop_height;
-		}
-		else {
-			frame_width = fi->uv_crop_width;
-			frame_height = fi->uv_crop_height;
-		}
-		ref_frame_buf = ref_buffers[plane];
+	uint8_t* dst_buf = buffers[plane] + cuda_scaled_buffer_offset((MI_SIZE * mi_col) >> subsampling_x,
+		(MI_SIZE * mi_row) >> subsampling_y, strides[plane], NULL);
 
-		cuda_dec_build_inter_predictors(subsampling_x, subsampling_y, -(mi_row * MI_SIZE * 8),
-			-(mi_col * MI_SIZE * 8), fi->bit_depth, 4 * x, 4 * y, 4, 4, kernel,
-			sf[k], buf_stride, dst_buf, &mv, ref_frame_buf, frame_width, frame_height, ref);
+	const int buf_stride = strides[plane];
+
+	int frame_width;
+	int frame_height;
+	uint8_t* ref_frame_buf;
+
+	if (plane == 0) {
+		frame_width = fi->y_crop_width;
+		frame_height = fi->y_crop_height;
 	}
+	else {
+		frame_width = fi->uv_crop_width;
+		frame_height = fi->uv_crop_height;
+	}
+	ref_frame_buf = ref_buffers[plane];
+
+	cuda_dec_build_inter_predictors_comp(subsampling_x, subsampling_y, -(mi_row * MI_SIZE * 8),
+		-(mi_col * MI_SIZE * 8), fi->bit_depth, 4 * x, 4 * y, 4, 4, kernel,
+		sf[k], buf_stride, dst_buf, &mv, ref_frame_buf, frame_width, frame_height);
 }
 
-__global__ static void cuda_inter_4x4(uint8_t* alloc, uint8_t* frame_ref1, uint8_t* frame_ref2, uint8_t* frame_ref3, FrameInformation* fi,
-	int16_t* mv, struct scale_factors* const sf1, struct scale_factors* const sf2, struct scale_factors* const sf3, 
-	const int super_size, MV_REFERENCE_FRAME* ref_frame, int * block_settings)
+__device__ static void cuda_dec_build_inter_predictors_4x4_copy(FrameInformation* fi, int subsampling_x,
+	int subsampling_y, int interp_filter, MV_REFERENCE_FRAME ref_frame, uint8_t* alloc,
+	uint8_t* frame_refs[3], struct scale_factors* const sf[3], int16_t my, int16_t mx, int mi_row, int mi_col,
+	int plane, int x, int y) {
+	int size = 0;
+
+	uint8_t* y_buf = (uint8_t*)yv12_align_addr(alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
+	uint8_t* u_buf = (uint8_t*)yv12_align_addr(alloc + fi->yplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* v_buf = (uint8_t*)yv12_align_addr(alloc + fi->yplane_size + fi->uvplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+
+	uint8_t* const buffers[MAX_MB_PLANE] = { y_buf, u_buf, v_buf };
+	const int strides[MAX_MB_PLANE] = { fi->y_stride, fi->uv_stride, fi->uv_stride };
+
+	const InterpKernel* kernel = cuda_vp9_filter_kernels[interp_filter];
+	
+	int k = ref_frame - LAST_FRAME;
+
+	uint8_t* ref_alloc = frame_refs[k];
+	uint8_t* ref_y_buf = (uint8_t*)yv12_align_addr(ref_alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
+	uint8_t* ref_u_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* ref_v_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + fi->uvplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* const ref_buffers[MAX_MB_PLANE] = { ref_y_buf, ref_u_buf, ref_v_buf };
+
+	const MV mv = { my, mx };
+
+	uint8_t* dst_buf = buffers[plane] + cuda_scaled_buffer_offset((MI_SIZE * mi_col) >> subsampling_x,
+		(MI_SIZE * mi_row) >> subsampling_y, strides[plane], NULL);
+
+	const int buf_stride = strides[plane];
+
+	int frame_width;
+	int frame_height;
+	uint8_t* ref_frame_buf;
+
+	if (plane == 0) {
+		frame_width = fi->y_crop_width;
+		frame_height = fi->y_crop_height;
+	}
+	else {
+		frame_width = fi->uv_crop_width;
+		frame_height = fi->uv_crop_height;
+	}
+	ref_frame_buf = ref_buffers[plane];
+
+	cuda_dec_build_inter_predictors_copy(subsampling_x, subsampling_y, -(mi_row * MI_SIZE * 8),
+		-(mi_col * MI_SIZE * 8), fi->bit_depth, 4 * x, 4 * y, 4, 4, kernel,
+		sf[k], buf_stride, dst_buf, &mv, ref_frame_buf, frame_width, frame_height);
+}
+
+__device__ static void cuda_dec_build_inter_predictors_4x4_vert(FrameInformation* fi, int subsampling_x,
+	int subsampling_y, int interp_filter, MV_REFERENCE_FRAME ref_frame, uint8_t* alloc,
+	uint8_t* frame_refs[3], struct scale_factors* const sf[3], int16_t my, int16_t mx, int mi_row, int mi_col,
+	int plane, int x, int y) {
+
+	uint8_t* y_buf = (uint8_t*)yv12_align_addr(alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
+	uint8_t* u_buf = (uint8_t*)yv12_align_addr(alloc + fi->yplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* v_buf = (uint8_t*)yv12_align_addr(alloc + fi->yplane_size + fi->uvplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+
+	uint8_t* const buffers[MAX_MB_PLANE] = { y_buf, u_buf, v_buf };
+	const int strides[MAX_MB_PLANE] = { fi->y_stride, fi->uv_stride, fi->uv_stride };
+
+	const InterpKernel* kernel = cuda_vp9_filter_kernels[interp_filter];
+	
+	int k = ref_frame - LAST_FRAME;
+
+	uint8_t* ref_alloc = frame_refs[k];
+	uint8_t* ref_y_buf = (uint8_t*)yv12_align_addr(ref_alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
+	uint8_t* ref_u_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* ref_v_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + fi->uvplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* const ref_buffers[MAX_MB_PLANE] = { ref_y_buf, ref_u_buf, ref_v_buf };
+
+	const MV mv = { my, mx };
+
+	uint8_t* dst_buf = buffers[plane] + cuda_scaled_buffer_offset((MI_SIZE * mi_col) >> subsampling_x,
+		(MI_SIZE * mi_row) >> subsampling_y, strides[plane], NULL);
+
+	const int buf_stride = strides[plane];
+
+	int frame_width;
+	int frame_height;
+	uint8_t* ref_frame_buf;
+
+	if (plane == 0) {
+		frame_width = fi->y_crop_width;
+		frame_height = fi->y_crop_height;
+	}
+	else {
+		frame_width = fi->uv_crop_width;
+		frame_height = fi->uv_crop_height;
+	}
+	ref_frame_buf = ref_buffers[plane];
+
+	cuda_dec_build_inter_predictors_vert(subsampling_x, subsampling_y, -(mi_row * MI_SIZE * 8),
+		-(mi_col * MI_SIZE * 8), fi->bit_depth, 4 * x, 4 * y, 4, 4, kernel,
+		sf[k], buf_stride, dst_buf, &mv, ref_frame_buf, frame_width, frame_height);
+}
+
+__device__ static void cuda_dec_build_inter_predictors_4x4_horiz(FrameInformation* fi, int subsampling_x,
+	int subsampling_y, int interp_filter, MV_REFERENCE_FRAME ref_frame, uint8_t* alloc,
+	uint8_t* frame_refs[3], struct scale_factors* const sf[3], int16_t my, int16_t mx, int mi_row, int mi_col,
+	int plane, int x, int y) {
+
+	uint8_t* y_buf = (uint8_t*)yv12_align_addr(alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
+	uint8_t* u_buf = (uint8_t*)yv12_align_addr(alloc + fi->yplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* v_buf = (uint8_t*)yv12_align_addr(alloc + fi->yplane_size + fi->uvplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+
+	uint8_t* const buffers[MAX_MB_PLANE] = { y_buf, u_buf, v_buf };
+	const int strides[MAX_MB_PLANE] = { fi->y_stride, fi->uv_stride, fi->uv_stride };
+
+	const InterpKernel* kernel = cuda_vp9_filter_kernels[interp_filter];
+	
+	int k = ref_frame - LAST_FRAME;
+
+	uint8_t* ref_alloc = frame_refs[k];
+	uint8_t* ref_y_buf = (uint8_t*)yv12_align_addr(ref_alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
+	uint8_t* ref_u_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* ref_v_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + fi->uvplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* const ref_buffers[MAX_MB_PLANE] = { ref_y_buf, ref_u_buf, ref_v_buf };
+
+	const MV mv = { my, mx };
+
+	uint8_t* dst_buf = buffers[plane] + cuda_scaled_buffer_offset((MI_SIZE * mi_col) >> subsampling_x,
+		(MI_SIZE * mi_row) >> subsampling_y, strides[plane], NULL);
+
+	const int buf_stride = strides[plane];
+
+	int frame_width;
+	int frame_height;
+	uint8_t* ref_frame_buf;
+
+	if (plane == 0) {
+		frame_width = fi->y_crop_width;
+		frame_height = fi->y_crop_height;
+	}
+	else {
+		frame_width = fi->uv_crop_width;
+		frame_height = fi->uv_crop_height;
+	}
+	ref_frame_buf = ref_buffers[plane];
+
+	cuda_dec_build_inter_predictors_horiz(subsampling_x, subsampling_y, -(mi_row * MI_SIZE * 8),
+		-(mi_col * MI_SIZE * 8), fi->bit_depth, 4 * x, 4 * y, 4, 4, kernel,
+		sf[k], buf_stride, dst_buf, &mv, ref_frame_buf, frame_width, frame_height);
+}
+
+__device__ static void cuda_dec_build_inter_predictors_4x4_both(FrameInformation* fi, int subsampling_x,
+	int subsampling_y, int interp_filter, MV_REFERENCE_FRAME ref_frame, uint8_t* alloc,
+	uint8_t* frame_refs[3], struct scale_factors* const sf[3], int16_t my, int16_t mx, int mi_row, int mi_col,
+	int plane, int x, int y) {
+
+	uint8_t* y_buf = (uint8_t*)yv12_align_addr(alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
+	uint8_t* u_buf = (uint8_t*)yv12_align_addr(alloc + fi->yplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* v_buf = (uint8_t*)yv12_align_addr(alloc + fi->yplane_size + fi->uvplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+
+	uint8_t* const buffers[MAX_MB_PLANE] = { y_buf, u_buf, v_buf };
+	const int strides[MAX_MB_PLANE] = { fi->y_stride, fi->uv_stride, fi->uv_stride };
+
+	const InterpKernel* kernel = cuda_vp9_filter_kernels[interp_filter];
+	
+	int k = ref_frame - LAST_FRAME;
+
+	uint8_t* ref_alloc = frame_refs[k];
+	uint8_t* ref_y_buf = (uint8_t*)yv12_align_addr(ref_alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
+	uint8_t* ref_u_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* ref_v_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + fi->uvplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
+	uint8_t* const ref_buffers[MAX_MB_PLANE] = { ref_y_buf, ref_u_buf, ref_v_buf };
+
+	const MV mv = { my, mx };
+
+	uint8_t* dst_buf = buffers[plane] + cuda_scaled_buffer_offset((MI_SIZE * mi_col) >> subsampling_x,
+		(MI_SIZE * mi_row) >> subsampling_y, strides[plane], NULL);
+
+	const int buf_stride = strides[plane];
+
+	int frame_width;
+	int frame_height;
+	uint8_t* ref_frame_buf;
+
+	if (plane == 0) {
+		frame_width = fi->y_crop_width;
+		frame_height = fi->y_crop_height;
+	}
+	else {
+		frame_width = fi->uv_crop_width;
+		frame_height = fi->uv_crop_height;
+	}
+	ref_frame_buf = ref_buffers[plane];
+
+	cuda_dec_build_inter_predictors_both(subsampling_x, subsampling_y, -(mi_row * MI_SIZE * 8),
+		-(mi_col * MI_SIZE * 8), fi->bit_depth, 4 * x, 4 * y, 4, 4, kernel,
+		sf[k], buf_stride, dst_buf, &mv, ref_frame_buf, frame_width, frame_height);
+}
+
+__global__ static void cuda_inter_4x4_comp(uint8_t* alloc, uint8_t* frame_ref1, uint8_t* frame_ref2, uint8_t* frame_ref3, FrameInformation* fi,
+	int16_t* mv, struct scale_factors* const sf1, struct scale_factors* const sf2, struct scale_factors* const sf3,
+	const int super_size, MV_REFERENCE_FRAME* ref_frame, int* block_settings, int begin)
 {
 #if CONFIG_VP9_HIGHBITDEPTH
 	uint8_t* frame_refs[3] = { CONVERT_TO_BYTEPTR(frame_ref1), CONVERT_TO_BYTEPTR(frame_ref2), CONVERT_TO_BYTEPTR(frame_ref3) };
 #else
 	uint8_t* frame_refs[3] = { frame_ref1, frame_ref2, frame_ref3 };
 #endif
-	
+
 	struct scale_factors* const sf[3] = { sf1, sf2, sf3 };
-	unsigned int i = threadIdx.x + blockIdx.x * blockDim.x;
-	unsigned int delta = blockDim.x * gridDim.x;
+	unsigned int i = threadIdx.x + blockIdx.x * blockDim.x + begin;
 	uint8_t* converted_alloc = alloc;
-	
+
 #if CONFIG_VP9_HIGHBITDEPTH
 	converted_alloc = CONVERT_TO_BYTEPTR(converted_alloc);
 #endif
 
-	MV_REFERENCE_FRAME temp_ref_frame[2];
-	int16_t t_mx[2];
-	int16_t t_my[2];
-	
 	if (i < super_size) {
-		for(int j = 0; j < 2; ++j)
-		{
-			temp_ref_frame[j] = ref_frame[2 * i + j];
-			t_mx[j] = mv[4 * i + j];
-			t_my[j] = mv[4 * i + j + 2];
-		}
-
-		//if(i == 0)
-		//{
-		//	t_mx[0] = 0;
-		//	t_my[1] = 0;
-		//}
-		//else if (i == 1) {
-		//	t_mx[0] = 0;
-		//	t_my[1] = 1;
-		//}
-		//else if (i == 2) {
-		//	t_mx[0] = 1;
-		//	t_my[1] = 0;
-		//}
-		//else if (i == 3) {
-		//	t_mx[0] = 1;
-		//	t_my[1] = 1;
-		//}
-		
-		cuda_dec_build_inter_predictors_4x4(fi, block_settings[9 * i + 5], block_settings[9 * i + 6], block_settings[9 * i + 7],
-			block_settings[9 * i + 8], temp_ref_frame, converted_alloc, frame_refs, sf, t_my, t_mx, block_settings[9 * i + 3],
+		cuda_dec_build_inter_predictors_4x4_comp(fi, block_settings[9 * i + 5], block_settings[9 * i + 6], block_settings[9 * i + 7],
+			ref_frame[i], converted_alloc, frame_refs, sf, mv[2 * i + 1], mv[2 * i], block_settings[9 * i + 3],
 			block_settings[9 * i + 4], block_settings[9 * i + 2], block_settings[9 * i], block_settings[9 * i + 1]);
-		
+
+	}
+}
+
+__global__ static void cuda_inter_4x4_copy(uint8_t* alloc, uint8_t* frame_ref1, uint8_t* frame_ref2, uint8_t* frame_ref3, FrameInformation* fi,
+	int16_t* mv, struct scale_factors* const sf1, struct scale_factors* const sf2, struct scale_factors* const sf3,
+	const int super_size, MV_REFERENCE_FRAME* ref_frame, int* block_settings, int begin)
+{
+#if CONFIG_VP9_HIGHBITDEPTH
+	uint8_t* frame_refs[3] = { CONVERT_TO_BYTEPTR(frame_ref1), CONVERT_TO_BYTEPTR(frame_ref2), CONVERT_TO_BYTEPTR(frame_ref3) };
+#else
+	uint8_t* frame_refs[3] = { frame_ref1, frame_ref2, frame_ref3 };
+#endif
+
+	struct scale_factors* const sf[3] = { sf1, sf2, sf3 };
+	unsigned int i = threadIdx.x + blockIdx.x * blockDim.x + begin;
+	uint8_t* converted_alloc = alloc;
+
+#if CONFIG_VP9_HIGHBITDEPTH
+	converted_alloc = CONVERT_TO_BYTEPTR(converted_alloc);
+#endif
+
+	if (i < super_size) {
+		cuda_dec_build_inter_predictors_4x4_copy(fi, block_settings[9 * i + 5], block_settings[9 * i + 6], block_settings[9 * i + 7],
+			ref_frame[i], converted_alloc, frame_refs, sf, mv[2 * i + 1], mv[2 * i], block_settings[9 * i + 3],
+			block_settings[9 * i + 4], block_settings[9 * i + 2], block_settings[9 * i], block_settings[9 * i + 1]);
+
+	}
+}
+
+__global__ static void cuda_inter_4x4_vert(uint8_t* alloc, uint8_t* frame_ref1, uint8_t* frame_ref2, uint8_t* frame_ref3, FrameInformation* fi,
+	int16_t* mv, struct scale_factors* const sf1, struct scale_factors* const sf2, struct scale_factors* const sf3,
+	const int super_size, MV_REFERENCE_FRAME* ref_frame, int* block_settings, int begin)
+{
+#if CONFIG_VP9_HIGHBITDEPTH
+	uint8_t* frame_refs[3] = { CONVERT_TO_BYTEPTR(frame_ref1), CONVERT_TO_BYTEPTR(frame_ref2), CONVERT_TO_BYTEPTR(frame_ref3) };
+#else
+	uint8_t* frame_refs[3] = { frame_ref1, frame_ref2, frame_ref3 };
+#endif
+
+	struct scale_factors* const sf[3] = { sf1, sf2, sf3 };
+	unsigned int i = threadIdx.x + blockIdx.x * blockDim.x + begin;
+	uint8_t* converted_alloc = alloc;
+
+#if CONFIG_VP9_HIGHBITDEPTH
+	converted_alloc = CONVERT_TO_BYTEPTR(converted_alloc);
+#endif
+
+	if (i < super_size) {
+		cuda_dec_build_inter_predictors_4x4_vert(fi, block_settings[9 * i + 5], block_settings[9 * i + 6], block_settings[9 * i + 7],
+			ref_frame[i], converted_alloc, frame_refs, sf, mv[2 * i + 1], mv[2 * i], block_settings[9 * i + 3],
+			block_settings[9 * i + 4], block_settings[9 * i + 2], block_settings[9 * i], block_settings[9 * i + 1]);
+
+	}
+}
+
+__global__ static void cuda_inter_4x4_horiz(uint8_t* alloc, uint8_t* frame_ref1, uint8_t* frame_ref2, uint8_t* frame_ref3, FrameInformation* fi,
+	int16_t* mv, struct scale_factors* const sf1, struct scale_factors* const sf2, struct scale_factors* const sf3,
+	const int super_size, MV_REFERENCE_FRAME* ref_frame, int* block_settings, int begin)
+{
+#if CONFIG_VP9_HIGHBITDEPTH
+	uint8_t* frame_refs[3] = { CONVERT_TO_BYTEPTR(frame_ref1), CONVERT_TO_BYTEPTR(frame_ref2), CONVERT_TO_BYTEPTR(frame_ref3) };
+#else
+	uint8_t* frame_refs[3] = { frame_ref1, frame_ref2, frame_ref3 };
+#endif
+
+	struct scale_factors* const sf[3] = { sf1, sf2, sf3 };
+	unsigned int i = threadIdx.x + blockIdx.x * blockDim.x + begin;
+	uint8_t* converted_alloc = alloc;
+
+#if CONFIG_VP9_HIGHBITDEPTH
+	converted_alloc = CONVERT_TO_BYTEPTR(converted_alloc);
+#endif
+
+	if (i < super_size) {
+		cuda_dec_build_inter_predictors_4x4_horiz(fi, block_settings[9 * i + 5], block_settings[9 * i + 6], block_settings[9 * i + 7],
+			ref_frame[i], converted_alloc, frame_refs, sf, mv[2 * i + 1], mv[2 * i], block_settings[9 * i + 3],
+			block_settings[9 * i + 4], block_settings[9 * i + 2], block_settings[9 * i], block_settings[9 * i + 1]);
+
+	}
+}
+
+__global__ static void cuda_inter_4x4_both(uint8_t* alloc, uint8_t* frame_ref1, uint8_t* frame_ref2, uint8_t* frame_ref3, FrameInformation* fi,
+	int16_t* mv, struct scale_factors* const sf1, struct scale_factors* const sf2, struct scale_factors* const sf3,
+	const int super_size, MV_REFERENCE_FRAME* ref_frame, int* block_settings, int begin)
+{
+#if CONFIG_VP9_HIGHBITDEPTH
+	uint8_t* frame_refs[3] = { CONVERT_TO_BYTEPTR(frame_ref1), CONVERT_TO_BYTEPTR(frame_ref2), CONVERT_TO_BYTEPTR(frame_ref3) };
+#else
+	uint8_t* frame_refs[3] = { frame_ref1, frame_ref2, frame_ref3 };
+#endif
+
+	struct scale_factors* const sf[3] = { sf1, sf2, sf3 };
+	unsigned int i = threadIdx.x + blockIdx.x * blockDim.x + begin;
+	uint8_t* converted_alloc = alloc;
+
+#if CONFIG_VP9_HIGHBITDEPTH
+	converted_alloc = CONVERT_TO_BYTEPTR(converted_alloc);
+#endif
+
+	if (i < super_size) {
+		cuda_dec_build_inter_predictors_4x4_both(fi, block_settings[9 * i + 5], block_settings[9 * i + 6], block_settings[9 * i + 7],
+			ref_frame[i], converted_alloc, frame_refs, sf, mv[2 * i + 1], mv[2 * i], block_settings[9 * i + 3],
+			block_settings[9 * i + 4], block_settings[9 * i + 2], block_settings[9 * i], block_settings[9 * i + 1]);
+
 	}
 }
 
@@ -869,7 +1561,8 @@ __host__ void copyFrameInfo(FrameInformation* cd_fi, FrameInformation* fi)
 }
 
 __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm, VP9Decoder* pbi, int tile_rows, int tile_cols, 
-							int* host_block_settings, MV_REFERENCE_FRAME* host_ref_frame, int16_t* host_mv, FrameInformation* host_fi)
+							int* host_block_settings, MV_REFERENCE_FRAME* host_ref_frame, int16_t* host_mv, FrameInformation* host_fi,
+							int* copy, int* vert, int* horiz, int* both)
 {
 	YV12_BUFFER_CONFIG* src = &cm->buffer_pool->frame_bufs[cm->new_fb_idx].buf;
 	
@@ -895,6 +1588,14 @@ __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 	host_fi->y_crop_height = src->y_crop_height;
 	host_fi->uv_crop_width = src->uv_crop_width;
 	host_fi->uv_crop_height = src->uv_crop_height;
+
+	ModeInfoBuf strt_mi_buf;
+	strt_mi_buf.bhl = MiBuf->bhl;
+	strt_mi_buf.bwl = MiBuf->bwl;
+	strt_mi_buf.mi_col = MiBuf->mi_col;
+	strt_mi_buf.mi_row = MiBuf->mi_row;
+	strt_mi_buf.mi = MiBuf->mi;
+	int* strt_size_for_mb = size_for_mb;
 	
 	TileWorkerData* tile_data;
 	int super_size = 0;
@@ -915,9 +1616,6 @@ __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 							const int bw = 1 << (*MiBuf->bwl - 1);
 							int plane;
 							if (MiBuf->mi[0]->sb_type < BLOCK_8X8) {
-
-							}
-							else {
 								for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
 									int t_subsampling_x = xd->plane[plane].subsampling_x;
 									int t_subsampling_y = xd->plane[plane].subsampling_y;
@@ -925,25 +1623,407 @@ __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 									const int num_4x4_w = (bw << 1) >> t_subsampling_x;
 									const int num_4x4_h = (bh << 1) >> t_subsampling_y;
 
+									int k = 0;
 									for (int y = 0; y < num_4x4_h; ++y) {
 										for (int x = 0; x < num_4x4_w; ++x) {
-											host_ref_frame[2 * super_size + 0] = MiBuf->mi[0]->ref_frame[0];
-											host_ref_frame[2 * super_size + 1] = MiBuf->mi[0]->ref_frame[1];
-											host_mv[4 * super_size + 0] = MiBuf->mi[0]->mv[0].as_mv.col;
-											host_mv[4 * super_size + 2] = MiBuf->mi[0]->mv[0].as_mv.row;
-											host_mv[4 * super_size + 1] = MiBuf->mi[0]->mv[1].as_mv.col;
-											host_mv[4 * super_size + 3] = MiBuf->mi[0]->mv[1].as_mv.row;
-											host_block_settings[9 * super_size + 5] = xd->plane[plane].subsampling_x;
-											host_block_settings[9 * super_size + 6] = xd->plane[plane].subsampling_y;
-											host_block_settings[9 * super_size + 7] = MiBuf->mi[0]->interp_filter;
-											host_block_settings[9 * super_size + 8] = has_second_ref(MiBuf->mi[0]);
-											host_block_settings[9 * super_size + 3] = *MiBuf->mi_row;
-											host_block_settings[9 * super_size + 4] = *MiBuf->mi_col;
-											host_block_settings[9 * super_size + 0] = x;
-											host_block_settings[9 * super_size + 1] = y;
-											host_block_settings[9 * super_size + 2] = plane;
+											const MV mv0 = average_split_mvs(&xd->plane[plane], MiBuf->mi[0], 0, k);
 
-											++super_size;
+											if (mv0.col == 0 && mv0.row == 0)
+											{
+												++*copy;
+												++super_size;
+											}
+											else if (mv0.col == 0 && mv0.row != 0)
+											{
+												++*vert;
+												++super_size;
+											}
+											else if (mv0.col != 0 && mv0.row == 0)
+											{
+												++*horiz;
+												++super_size;
+											}
+											else if (mv0.col != 0 && mv0.row != 0)
+											{
+												++*both;
+												++super_size;
+											}
+										}
+									}
+									
+								}
+							}
+							else {
+								for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
+									int t_subsampling_x = xd->plane[plane].subsampling_x;
+									int t_subsampling_y = xd->plane[plane].subsampling_y;
+	
+									const int num_4x4_w = (bw << 1) >> t_subsampling_x;
+									const int num_4x4_h = (bh << 1) >> t_subsampling_y;
+	
+									if(MiBuf->mi[0]->mv[0].as_mv.col == 0 && MiBuf->mi[0]->mv[0].as_mv.row == 0)
+									{
+										for (int y = 0; y < num_4x4_h; ++y) {
+											for (int x = 0; x < num_4x4_w; ++x) {
+												++*copy;
+												++super_size;
+											}
+										}
+									}
+									else if (MiBuf->mi[0]->mv[0].as_mv.col == 0 && MiBuf->mi[0]->mv[0].as_mv.row != 0)
+									{
+										for (int y = 0; y < num_4x4_h; ++y) {
+											for (int x = 0; x < num_4x4_w; ++x) {
+												++*vert;
+												++super_size;
+											}
+										}
+									}
+									else if (MiBuf->mi[0]->mv[0].as_mv.col != 0 && MiBuf->mi[0]->mv[0].as_mv.row == 0)
+									{
+										for (int y = 0; y < num_4x4_h; ++y) {
+											for (int x = 0; x < num_4x4_w; ++x) {
+												++*horiz;
+												++super_size;
+											}
+										}
+									}
+									else if (MiBuf->mi[0]->mv[0].as_mv.col != 0 && MiBuf->mi[0]->mv[0].as_mv.row != 0)
+									{
+										for (int y = 0; y < num_4x4_h; ++y) {
+											for (int x = 0; x < num_4x4_w; ++x) {
+												++*both;
+												++super_size;
+											}
+										}
+									}
+								}
+							}
+						}
+	
+						++MiBuf->mi_col;
+						++MiBuf->mi;
+						++MiBuf->mi_row;
+						++MiBuf->bhl;
+						++MiBuf->bwl;
+					}
+					++size_for_mb;
+				}
+			}
+		}
+	}
+	
+	MiBuf->bhl = strt_mi_buf.bhl;
+	MiBuf->bwl = strt_mi_buf.bwl;
+	MiBuf->mi_row = strt_mi_buf.mi_row;
+	MiBuf->mi_col = strt_mi_buf.mi_col;
+	MiBuf->mi = strt_mi_buf.mi;
+	size_for_mb = strt_size_for_mb;
+
+	int t_copy = 0;
+	int t_vert = *copy;
+	int t_horiz = t_vert + *vert;
+	int t_both = t_horiz + *horiz;
+	
+	for (tile_row = 0; tile_row < tile_rows; ++tile_row) {
+		TileInfo tile;
+		vp9_tile_set_row(&tile, cm, tile_row);
+		for (mi_row = tile.mi_row_start; mi_row < tile.mi_row_end; mi_row += MI_BLOCK_SIZE) {
+			for (tile_col = 0; tile_col < tile_cols; ++tile_col) {
+				const int col = pbi->inv_tile_order ? tile_cols - tile_col - 1 : tile_col;
+				tile_data = pbi->tile_worker_data + tile_cols * tile_row + col;
+				vp9_tile_set_col(&tile, cm, col);
+				MACROBLOCKD* const xd = &tile_data->xd;
+				for (mi_col = tile.mi_col_start; mi_col < tile.mi_col_end; mi_col += MI_BLOCK_SIZE) {
+					for (int i = 0; i < *size_for_mb; ++i) {
+						if (is_inter_block(MiBuf->mi[0])) {
+							const int bh = 1 << (*MiBuf->bhl - 1);
+							const int bw = 1 << (*MiBuf->bwl - 1);
+							int plane;
+							if (MiBuf->mi[0]->sb_type < BLOCK_8X8) {
+								for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
+									int t_subsampling_x = xd->plane[plane].subsampling_x;
+									int t_subsampling_y = xd->plane[plane].subsampling_y;
+
+									const int num_4x4_w = (bw << 1) >> t_subsampling_x;
+									const int num_4x4_h = (bh << 1) >> t_subsampling_y;
+
+									int k = 0;
+									for (int y = 0; y < num_4x4_h; ++y) {
+										for (int x = 0; x < num_4x4_w; ++x) {
+											const MV mv0 = average_split_mvs(&xd->plane[plane], MiBuf->mi[0], 0, k);
+
+											if (mv0.col == 0 && mv0.row == 0)
+											{
+												host_ref_frame[1 * t_copy + 0] = MiBuf->mi[0]->ref_frame[0];
+												host_mv[2 * t_copy + 0] = MiBuf->mi[0]->mv[0].as_mv.col;
+												host_mv[2 * t_copy + 1] = MiBuf->mi[0]->mv[0].as_mv.row;
+												host_block_settings[9 * t_copy + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[9 * t_copy + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[9 * t_copy + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[9 * t_copy + 8] = has_second_ref(MiBuf->mi[0]);
+												host_block_settings[9 * t_copy + 3] = *MiBuf->mi_row;
+												host_block_settings[9 * t_copy + 4] = *MiBuf->mi_col;
+												host_block_settings[9 * t_copy + 0] = x;
+												host_block_settings[9 * t_copy + 1] = y;
+												host_block_settings[9 * t_copy + 2] = plane;
+
+												++t_copy;
+											}
+											else if (mv0.col == 0 && mv0.row != 0)
+											{
+												host_ref_frame[1 * t_vert + 0] = MiBuf->mi[0]->ref_frame[0];
+												host_mv[2 * t_vert + 0] = MiBuf->mi[0]->mv[0].as_mv.col;
+												host_mv[2 * t_vert + 1] = MiBuf->mi[0]->mv[0].as_mv.row;
+												host_block_settings[9 * t_vert + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[9 * t_vert + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[9 * t_vert + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[9 * t_vert + 8] = has_second_ref(MiBuf->mi[0]);
+												host_block_settings[9 * t_vert + 3] = *MiBuf->mi_row;
+												host_block_settings[9 * t_vert + 4] = *MiBuf->mi_col;
+												host_block_settings[9 * t_vert + 0] = x;
+												host_block_settings[9 * t_vert + 1] = y;
+												host_block_settings[9 * t_vert + 2] = plane;
+
+												++t_vert;
+											}
+											else if (mv0.col != 0 && mv0.row == 0)
+											{
+												host_ref_frame[1 * t_horiz + 0] = MiBuf->mi[0]->ref_frame[0];
+												host_mv[2 * t_horiz + 0] = MiBuf->mi[0]->mv[0].as_mv.col;
+												host_mv[2 * t_horiz + 1] = MiBuf->mi[0]->mv[0].as_mv.row;
+												host_block_settings[9 * t_horiz + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[9 * t_horiz + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[9 * t_horiz + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[9 * t_horiz + 8] = has_second_ref(MiBuf->mi[0]);
+												host_block_settings[9 * t_horiz + 3] = *MiBuf->mi_row;
+												host_block_settings[9 * t_horiz + 4] = *MiBuf->mi_col;
+												host_block_settings[9 * t_horiz + 0] = x;
+												host_block_settings[9 * t_horiz + 1] = y;
+												host_block_settings[9 * t_horiz + 2] = plane;
+
+												++t_horiz;
+											}
+											else if (mv0.col != 0 && mv0.row != 0)
+											{
+												host_ref_frame[1 * t_both + 0] = MiBuf->mi[0]->ref_frame[0];
+												host_mv[2 * t_both + 0] = MiBuf->mi[0]->mv[0].as_mv.col;
+												host_mv[2 * t_both + 1] = MiBuf->mi[0]->mv[0].as_mv.row;
+												host_block_settings[9 * t_both + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[9 * t_both + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[9 * t_both + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[9 * t_both + 8] = has_second_ref(MiBuf->mi[0]);
+												host_block_settings[9 * t_both + 3] = *MiBuf->mi_row;
+												host_block_settings[9 * t_both + 4] = *MiBuf->mi_col;
+												host_block_settings[9 * t_both + 0] = x;
+												host_block_settings[9 * t_both + 1] = y;
+												host_block_settings[9 * t_both + 2] = plane;
+
+												++t_both;
+											}
+										}
+									}
+
+								}
+							}
+							else {
+								for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
+									int t_subsampling_x = xd->plane[plane].subsampling_x;
+									int t_subsampling_y = xd->plane[plane].subsampling_y;
+	
+									const int num_4x4_w = (bw << 1) >> t_subsampling_x;
+									const int num_4x4_h = (bh << 1) >> t_subsampling_y;
+	
+									if (MiBuf->mi[0]->mv[0].as_mv.col == 0 && MiBuf->mi[0]->mv[0].as_mv.row == 0)
+									{
+										for (int y = 0; y < num_4x4_h; ++y) {
+											for (int x = 0; x < num_4x4_w; ++x) {
+												host_ref_frame[1 * t_copy + 0] = MiBuf->mi[0]->ref_frame[0];
+												host_mv[2 * t_copy + 0] = MiBuf->mi[0]->mv[0].as_mv.col;
+												host_mv[2 * t_copy + 1] = MiBuf->mi[0]->mv[0].as_mv.row;
+												host_block_settings[9 * t_copy + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[9 * t_copy + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[9 * t_copy + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[9 * t_copy + 8] = has_second_ref(MiBuf->mi[0]);
+												host_block_settings[9 * t_copy + 3] = *MiBuf->mi_row;
+												host_block_settings[9 * t_copy + 4] = *MiBuf->mi_col;
+												host_block_settings[9 * t_copy + 0] = x;
+												host_block_settings[9 * t_copy + 1] = y;
+												host_block_settings[9 * t_copy + 2] = plane;
+
+												++t_copy;
+											}
+										}
+									}
+									else if (MiBuf->mi[0]->mv[0].as_mv.col == 0 && MiBuf->mi[0]->mv[0].as_mv.row != 0)
+									{
+										for (int y = 0; y < num_4x4_h; ++y) {
+											for (int x = 0; x < num_4x4_w; ++x) {
+												host_ref_frame[1 * t_vert + 0] = MiBuf->mi[0]->ref_frame[0];
+												host_mv[2 * t_vert + 0] = MiBuf->mi[0]->mv[0].as_mv.col;
+												host_mv[2 * t_vert + 1] = MiBuf->mi[0]->mv[0].as_mv.row;
+												host_block_settings[9 * t_vert + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[9 * t_vert + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[9 * t_vert + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[9 * t_vert + 8] = has_second_ref(MiBuf->mi[0]);
+												host_block_settings[9 * t_vert + 3] = *MiBuf->mi_row;
+												host_block_settings[9 * t_vert + 4] = *MiBuf->mi_col;
+												host_block_settings[9 * t_vert + 0] = x;
+												host_block_settings[9 * t_vert + 1] = y;
+												host_block_settings[9 * t_vert + 2] = plane;
+
+												++t_vert;
+											}
+										}
+									}
+									else if (MiBuf->mi[0]->mv[0].as_mv.col != 0 && MiBuf->mi[0]->mv[0].as_mv.row == 0)
+									{
+										for (int y = 0; y < num_4x4_h; ++y) {
+											for (int x = 0; x < num_4x4_w; ++x) {
+												host_ref_frame[1 * t_horiz + 0] = MiBuf->mi[0]->ref_frame[0];
+												host_mv[2 * t_horiz + 0] = MiBuf->mi[0]->mv[0].as_mv.col;
+												host_mv[2 * t_horiz + 1] = MiBuf->mi[0]->mv[0].as_mv.row;
+												host_block_settings[9 * t_horiz + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[9 * t_horiz + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[9 * t_horiz + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[9 * t_horiz + 8] = has_second_ref(MiBuf->mi[0]);
+												host_block_settings[9 * t_horiz + 3] = *MiBuf->mi_row;
+												host_block_settings[9 * t_horiz + 4] = *MiBuf->mi_col;
+												host_block_settings[9 * t_horiz + 0] = x;
+												host_block_settings[9 * t_horiz + 1] = y;
+												host_block_settings[9 * t_horiz + 2] = plane;
+
+												++t_horiz;
+											}
+										}
+									}
+									else if (MiBuf->mi[0]->mv[0].as_mv.col != 0 && MiBuf->mi[0]->mv[0].as_mv.row != 0)
+									{
+										for (int y = 0; y < num_4x4_h; ++y) {
+											for (int x = 0; x < num_4x4_w; ++x) {
+												host_ref_frame[1 * t_both + 0] = MiBuf->mi[0]->ref_frame[0];
+												host_mv[2 * t_both + 0] = MiBuf->mi[0]->mv[0].as_mv.col;
+												host_mv[2 * t_both + 1] = MiBuf->mi[0]->mv[0].as_mv.row;
+												host_block_settings[9 * t_both + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[9 * t_both + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[9 * t_both + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[9 * t_both + 8] = has_second_ref(MiBuf->mi[0]);
+												host_block_settings[9 * t_both + 3] = *MiBuf->mi_row;
+												host_block_settings[9 * t_both + 4] = *MiBuf->mi_col;
+												host_block_settings[9 * t_both + 0] = x;
+												host_block_settings[9 * t_both + 1] = y;
+												host_block_settings[9 * t_both + 2] = plane;
+
+												++t_both;
+											}
+										}
+									}
+								}
+							}
+						}
+	
+						++MiBuf->mi_col;
+						++MiBuf->mi;
+						++MiBuf->mi_row;
+						++MiBuf->bhl;
+						++MiBuf->bwl;
+					}
+					++size_for_mb;
+				}
+			}
+		}
+	}
+
+	MiBuf->bhl = strt_mi_buf.bhl;
+	MiBuf->bwl = strt_mi_buf.bwl;
+	MiBuf->mi_row = strt_mi_buf.mi_row;
+	MiBuf->mi_col = strt_mi_buf.mi_col;
+	MiBuf->mi = strt_mi_buf.mi;
+	size_for_mb = strt_size_for_mb;
+	
+	return super_size;
+}
+
+__host__ int checkCompound(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm, VP9Decoder* pbi, int tile_rows, int tile_cols,
+	int* host_block_settings, MV_REFERENCE_FRAME* host_ref_frame, int16_t* host_mv)
+{
+	TileWorkerData* tile_data;
+	int super_size = 0;
+	int tile_row, mi_col, tile_col, mi_row;
+
+	for (tile_row = 0; tile_row < tile_rows; ++tile_row) {
+		TileInfo tile;
+		vp9_tile_set_row(&tile, cm, tile_row);
+		for (mi_row = tile.mi_row_start; mi_row < tile.mi_row_end; mi_row += MI_BLOCK_SIZE) {
+			for (tile_col = 0; tile_col < tile_cols; ++tile_col) {
+				const int col = pbi->inv_tile_order ? tile_cols - tile_col - 1 : tile_col;
+				tile_data = pbi->tile_worker_data + tile_cols * tile_row + col;
+				vp9_tile_set_col(&tile, cm, col);
+				MACROBLOCKD* const xd = &tile_data->xd;
+				for (mi_col = tile.mi_col_start; mi_col < tile.mi_col_end; mi_col += MI_BLOCK_SIZE) {
+					for (int i = 0; i < *size_for_mb; ++i) {
+						if (is_inter_block(MiBuf->mi[0])) {
+							if (has_second_ref(MiBuf->mi[0]))
+							{
+								const int bh = 1 << (*MiBuf->bhl - 1);
+								const int bw = 1 << (*MiBuf->bwl - 1);
+								int plane;
+								if (MiBuf->mi[0]->sb_type < BLOCK_8X8) {
+									for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
+										int t_subsampling_x = xd->plane[plane].subsampling_x;
+										int t_subsampling_y = xd->plane[plane].subsampling_y;
+
+										const int num_4x4_w = (bw << 1) >> t_subsampling_x;
+										const int num_4x4_h = (bh << 1) >> t_subsampling_y;
+
+										int k = 0;
+										for (int y = 0; y < num_4x4_h; ++y) {
+											for (int x = 0; x < num_4x4_w; ++x) {
+												host_ref_frame[1 * super_size + 0] = MiBuf->mi[0]->ref_frame[1];
+												host_mv[2 * super_size + 0] = MiBuf->mi[0]->mv[1].as_mv.col;
+												host_mv[2 * super_size + 1] = MiBuf->mi[0]->mv[1].as_mv.row;
+												host_block_settings[9 * super_size + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[9 * super_size + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[9 * super_size + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[9 * super_size + 8] = has_second_ref(MiBuf->mi[0]);
+												host_block_settings[9 * super_size + 3] = *MiBuf->mi_row;
+												host_block_settings[9 * super_size + 4] = *MiBuf->mi_col;
+												host_block_settings[9 * super_size + 0] = x;
+												host_block_settings[9 * super_size + 1] = y;
+												host_block_settings[9 * super_size + 2] = plane;
+
+												++super_size;
+
+											}
+										}
+
+									}
+								}
+								else {
+									for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
+										int t_subsampling_x = xd->plane[plane].subsampling_x;
+										int t_subsampling_y = xd->plane[plane].subsampling_y;
+
+										const int num_4x4_w = (bw << 1) >> t_subsampling_x;
+										const int num_4x4_h = (bh << 1) >> t_subsampling_y;
+
+										for (int y = 0; y < num_4x4_h; ++y) {
+											for (int x = 0; x < num_4x4_w; ++x) {
+												host_ref_frame[1 * super_size + 0] = MiBuf->mi[0]->ref_frame[1];
+												host_mv[2 * super_size + 0] = MiBuf->mi[0]->mv[1].as_mv.col;
+												host_mv[2 * super_size + 1] = MiBuf->mi[0]->mv[1].as_mv.row;
+												host_block_settings[9 * super_size + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[9 * super_size + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[9 * super_size + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[9 * super_size + 8] = has_second_ref(MiBuf->mi[0]);
+												host_block_settings[9 * super_size + 3] = *MiBuf->mi_row;
+												host_block_settings[9 * super_size + 4] = *MiBuf->mi_col;
+												host_block_settings[9 * super_size + 0] = x;
+												host_block_settings[9 * super_size + 1] = y;
+												host_block_settings[9 * super_size + 2] = plane;
+
+												++super_size;
+											}
 										}
 									}
 								}
@@ -968,6 +2048,12 @@ __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_for_mb, ModeInfoBuf* MiBuf,
                           VP9_COMMON* cm, VP9Decoder* pbi, int tile_rows, int tile_cols)
 {
+	cudaStream_t stream1, stream2, stream3, stream4;
+	cudaStreamCreateWithFlags(&stream1, cudaStreamNonBlocking);
+	cudaStreamCreateWithFlags(&stream2, cudaStreamNonBlocking);
+	cudaStreamCreateWithFlags(&stream3, cudaStreamNonBlocking);
+	cudaStreamCreateWithFlags(&stream4, cudaStreamNonBlocking);
+	
 	uint8_t* cd_alloc, * frame_ref1, * frame_ref2, * frame_ref3;
 	FrameInformation* cd_fi, * host_fi;
 	int * block_settings, * host_block_settings;
@@ -981,11 +2067,17 @@ int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_fo
 	
 	cudaHostAlloc((void**)&host_block_settings, 27 * n / 16 * sizeof(int), cudaHostAllocWriteCombined | cudaHostAllocMapped);
 	cudaHostAlloc((void**)&host_fi, sizeof(FrameInformation), cudaHostAllocWriteCombined | cudaHostAllocMapped);
-	cudaHostAlloc((void**)&host_mv, 12 * n / 16 * sizeof(int16_t), cudaHostAllocWriteCombined | cudaHostAllocMapped);
-	cudaHostAlloc((void**)&host_ref_frame, 6 * n / 16 * sizeof(MV_REFERENCE_FRAME),cudaHostAllocWriteCombined | cudaHostAllocMapped);
+	cudaHostAlloc((void**)&host_mv, 6 * n / 16 * sizeof(int16_t), cudaHostAllocWriteCombined | cudaHostAllocMapped);
+	cudaHostAlloc((void**)&host_ref_frame, 3 * n / 16 * sizeof(MV_REFERENCE_FRAME),cudaHostAllocWriteCombined | cudaHostAllocMapped);
 
-	int super_size = createBuffers(size_for_mb, MiBuf, cm, pbi, tile_rows, tile_cols, host_block_settings, host_ref_frame, host_mv, host_fi);
-
+	int copy = 0;
+	int both = 0;
+	int vert = 0;
+	int horiz = 0;
+	
+	int super_size = createBuffers(size_for_mb, MiBuf, cm, pbi, tile_rows, tile_cols, host_block_settings, host_ref_frame, host_mv, host_fi,
+		&copy, &vert, &horiz, &both);
+	
 	cudaMalloc((void**)&cd_alloc, host_fi->size);
 	cudaMalloc((void**)&frame_ref1, host_fi->size);
 	cudaMalloc((void**)&frame_ref2, host_fi->size);
@@ -1001,13 +2093,16 @@ int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_fo
 		cudaHostGetDevicePointer((void**)&mv, (void*)host_mv, 0);
 		cudaHostGetDevicePointer((void**)&block_settings, (void*)host_block_settings, 0);
 		cudaHostGetDevicePointer((void**)&ref_frame, (void*)host_ref_frame, 0);
-		cudaMemcpy(cd_alloc, alloc, host_fi->size, cudaMemcpyHostToDevice);
-		cudaMemcpy(frame_ref1, frame_refs[0], host_fi->size, cudaMemcpyHostToDevice);
-		cudaMemcpy(frame_ref2, frame_refs[1], host_fi->size, cudaMemcpyHostToDevice);
-		cudaMemcpy(frame_ref3, frame_refs[2], host_fi->size, cudaMemcpyHostToDevice);
-		copySF <<<1, 1>>> (sf1, sf[0]->x_scale_fp, sf[0]->y_scale_fp);
-		copySF <<<1, 1>>> (sf2, sf[1]->x_scale_fp, sf[1]->y_scale_fp);
-		copySF <<<1, 1>>> (sf3, sf[2]->x_scale_fp, sf[2]->y_scale_fp);
+		cudaMemcpyAsync(cd_alloc, alloc, host_fi->size, cudaMemcpyHostToDevice, stream1);
+		cudaMemcpyAsync(frame_ref1, frame_refs[0], host_fi->size, cudaMemcpyHostToDevice, stream2);
+		cudaMemcpyAsync(frame_ref2, frame_refs[1], host_fi->size, cudaMemcpyHostToDevice, stream3);
+		cudaMemcpyAsync(frame_ref3, frame_refs[2], host_fi->size, cudaMemcpyHostToDevice, stream4);
+		cudaDeviceSynchronize();
+
+		copySF <<<1, 1, 0, stream1>>> (sf1, sf[0]->x_scale_fp, sf[0]->y_scale_fp);
+		copySF <<<1, 1, 0, stream2>>> (sf2, sf[1]->x_scale_fp, sf[1]->y_scale_fp);
+		copySF <<<1, 1, 0, stream3>>> (sf3, sf[2]->x_scale_fp, sf[2]->y_scale_fp);
+		cudaDeviceSynchronize();
 	}
 	clock_t copy_end = clock();
 	*gpu_copy = (double)(copy_end - copy_begin) / CLOCKS_PER_SEC;
@@ -1020,10 +2115,36 @@ int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_fo
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
 	cudaEventRecord(start, 0);
-	int blocksPerGrid = MAX(1, (super_size + threadsPerBlock - 1) / threadsPerBlock);
-	cuda_inter_4x4 <<<blocksPerGrid, threadsPerBlock>>> (cd_alloc, frame_ref1, frame_ref2, frame_ref3, cd_fi, mv,
-															sf1, sf2, sf3, super_size, ref_frame, block_settings);
+	
+	int blocksPerGrid1 = MAX(1, (copy + threadsPerBlock - 1) / threadsPerBlock);
+	cuda_inter_4x4_copy <<<blocksPerGrid1, threadsPerBlock, 0, stream1>>> (cd_alloc, frame_ref1, frame_ref2, frame_ref3, cd_fi, mv,
+		sf1, sf2, sf3, copy, ref_frame, block_settings, 0);
+	
+	int blocksPerGrid2 = MAX(1, (vert + threadsPerBlock - 1) / threadsPerBlock);
+	cuda_inter_4x4_vert <<<blocksPerGrid2, threadsPerBlock, 0, stream2>>> (cd_alloc, frame_ref1, frame_ref2, frame_ref3, cd_fi, mv,
+		sf1, sf2, sf3, copy + vert, ref_frame, block_settings, copy);
+	
+	int blocksPerGrid3 = MAX(1, (horiz + threadsPerBlock - 1) / threadsPerBlock);
+	cuda_inter_4x4_horiz <<<blocksPerGrid3, threadsPerBlock, 0, stream3>>> (cd_alloc, frame_ref1, frame_ref2, frame_ref3, cd_fi, mv,
+		sf1, sf2, sf3, copy + vert + horiz, ref_frame, block_settings, copy + vert);
+
+	int a = copy + vert + horiz;
+	int blocksPerGrid4 = MAX(1, (both + threadsPerBlock - 1) / threadsPerBlock);
+	cuda_inter_4x4_both <<<blocksPerGrid4, threadsPerBlock, 0, stream4>>> (cd_alloc, frame_ref1, frame_ref2, frame_ref3, cd_fi, mv,
+		sf1, sf2, sf3, super_size, ref_frame, block_settings, a);
+	
 	cudaDeviceSynchronize();
+
+	super_size = checkCompound(size_for_mb, MiBuf, cm, pbi, tile_rows, tile_cols, host_block_settings, host_ref_frame, host_mv);
+
+	if (super_size > 0)
+	{
+		int blocksPerGrid = MAX(1, (super_size + threadsPerBlock - 1) / threadsPerBlock);
+		cuda_inter_4x4_comp <<<blocksPerGrid, threadsPerBlock>>> (cd_alloc, frame_ref1, frame_ref2, frame_ref3, cd_fi, mv,
+			sf1, sf2, sf3, super_size, ref_frame, block_settings, 0);
+		cudaDeviceSynchronize();
+	}
+	
 	cudaEventRecord(stop, 0);
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&elapsed, start, stop);
@@ -1035,6 +2156,11 @@ int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_fo
 	
 	cudaMemcpy(alloc, cd_alloc, host_fi->size, cudaMemcpyDeviceToHost);
 
+	cudaStreamDestroy(stream1);
+	cudaStreamDestroy(stream2);
+	cudaStreamDestroy(stream3);
+	cudaStreamDestroy(stream4);
+	
 	//free
 	{
 		cudaFreeHost(host_mv);
@@ -1055,39 +2181,12 @@ int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_fo
 
 __global__ void copySF(scale_factors* cuda_sf, int x_scale_fp, int y_scale_fp)
 {
-	
 	cuda_sf->x_scale_fp = x_scale_fp;
 	cuda_sf->y_scale_fp = y_scale_fp;
 	cuda_sf->x_step_q4 = 16;
 	cuda_sf->y_step_q4 = 16;
 	cuda_sf->scale_value_x = unscaled_value;
 	cuda_sf->scale_value_y = unscaled_value;
-
-	
-	// No scaling in either direction.
-	cuda_sf->predict[0][0][0] = cuda_vpx_convolve_copy_c;
-	cuda_sf->predict[0][0][1] = cuda_vpx_convolve_avg_c;
-	cuda_sf->predict[0][1][0] = cuda_vpx_convolve8_vert_c;
-	cuda_sf->predict[0][1][1] = cuda_vpx_convolve8_avg_vert_c;
-	cuda_sf->predict[1][0][0] = cuda_vpx_convolve8_horiz_c;
-	cuda_sf->predict[1][0][1] = cuda_vpx_convolve8_avg_horiz_c;
-		
-	// 2D subpel motion always gets filtered in both directions
-	cuda_sf->predict[1][1][0] = cuda_vpx_convolve8_c;
-	cuda_sf->predict[1][1][1] = cuda_vpx_convolve8_avg_c;
-
-	
-	// No scaling in either direction.
-	cuda_sf->highbd_predict[0][0][0] = cuda_vpx_highbd_convolve_copy_c;
-	cuda_sf->highbd_predict[0][0][1] = cuda_vpx_highbd_convolve_avg_c;
-	cuda_sf->highbd_predict[0][1][0] = cuda_vpx_highbd_convolve8_vert_c;
-	cuda_sf->highbd_predict[0][1][1] = cuda_vpx_highbd_convolve8_avg_vert_c;
-	cuda_sf->highbd_predict[1][0][0] = cuda_vpx_highbd_convolve8_horiz_c;
-	cuda_sf->highbd_predict[1][0][1] = cuda_vpx_highbd_convolve8_avg_horiz_c;
-	
-	// 2D subpel motion always gets filtered in both directions.
-	cuda_sf->highbd_predict[1][1][0] = cuda_vpx_highbd_convolve8_c;
-	cuda_sf->highbd_predict[1][1][1] = cuda_vpx_highbd_convolve8_avg_c;
 }
 
 __global__ void setFK()
