@@ -12,7 +12,7 @@
 
 #define MAX(a, b) ((a > b) ? a : b)
 
-const int threadsPerBlock = 512;
+const int threadsPerBlock = 160;
 
 #define FILTER_BITS 7
 
@@ -94,8 +94,6 @@ cuda_sub_pel_filters_4[SUBPEL_SHIFTS]) = {
 __constant__ InterpKernel* cuda_vp9_filter_kernels[5];
 
 __constant__ int idxFiltKern[1];
-
-__global__ void copySF(scale_factors* cuda_sf, int x_scale_fp, int y_scale_fp);
 
 __host__ int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_for_mb, ModeInfoBuf* MiBuf,
 	VP9_COMMON* cm, VP9Decoder* pbi, int tile_rows, int tile_cols);
