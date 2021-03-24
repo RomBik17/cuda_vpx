@@ -91,11 +91,10 @@ cuda_sub_pel_filters_4[SUBPEL_SHIFTS]) = {
 { 0, 0, -4, 18, 120, -6, 0, 0 },  { 0, 0, -2, 8, 126, -4, 0, 0 }
 };
 
-__constant__ InterpKernel* cuda_vp9_filter_kernels[5];
+__constant__ InterpKernel* cuda_vp9_filter_kernels[5] = { cuda_sub_pel_filters_8, cuda_sub_pel_filters_8lp,
+	cuda_sub_pel_filters_8s, cuda_bilinear_filters , cuda_sub_pel_filters_4 };
 
 __constant__ int idxFiltKern[1];
 
 __host__ int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_for_mb, ModeInfoBuf* MiBuf,
 	VP9_COMMON* cm, VP9Decoder* pbi, int tile_rows, int tile_cols);
-
-__global__ void setFK();

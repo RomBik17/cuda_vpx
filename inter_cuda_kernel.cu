@@ -495,6 +495,57 @@ __device__ static void cuda_highbd_convolve_avg_vert(const uint16_t* src, ptrdif
 	}
 }
 
+__device__ static void shared_convolve(const uint16_t* src, ptrdiff_t src_stride, uint16_t* dst, ptrdiff_t dst_stride,
+	const InterpKernel* filter, int x0_q4, int x_step_q4, int y0_q4, int y_step_q4, int bd, int y0, int frame_h) {
+	__shared__ int sm[16 * threadsPerBlock];
+	memset(sm + 16 * threadIdx.x, 0, 16 *  sizeof(int));
+
+	assert(y_step_q4 <= 32);
+	assert(x_step_q4 <= 32);
+
+	int x, y;
+	const uint16_t* ref_row = src - y0 * src_stride;
+	y0 -= (SUBPEL_TAPS / 2 - 1);
+	if (y0 >= frame_h) ref_row += (frame_h - 1) * src_stride;
+	else if (y0 > 0) ref_row += y0 * src_stride;
+	ref_row -= (SUBPEL_TAPS / 2 - 1);
+
+	for (y = 0; y < 11; ++y)
+	{
+		int x_q4 = x0_q4;
+		for (x = 0; x < 4; ++x)
+		{
+			const uint16_t* const src_x = &ref_row[x];
+			const int16_t* const x_filter = filter[x_q4 & SUBPEL_MASK];
+			int k, sum = 0;
+			for (k = 0; k < SUBPEL_TAPS; ++k) sum += src_x[k] * x_filter[k];
+			int a = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sum, FILTER_BITS), bd);
+
+			int y_q4 = y0_q4;
+			for (int j = 0; j < 4; ++j)
+			{
+				if (y - j < SUBPEL_TAPS && y >= j)
+				{
+					sm[16 * threadIdx.x + j * 4 + x] += a * filter[y_q4 & SUBPEL_MASK][y - j];
+				}
+				y_q4 += y_step_q4;
+			}
+			x_q4 += x_step_q4;
+		}
+		++y0;
+		if (y0 > 0 && y0 < frame_h) ref_row += src_stride;
+	}
+
+	for (x = 0; x < 4; ++x)
+	{
+		for (y = 0; y < 4; ++y)
+		{
+			dst[y * dst_stride] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[16 * threadIdx.x + y * 4 + x], FILTER_BITS), bd);
+		}
+		++dst;
+	}
+}
+
 __device__ static void both_const_idx(const uint16_t* src, ptrdiff_t src_stride, uint16_t* dst, ptrdiff_t dst_stride,
 	const InterpKernel* filter, int x0_q4, int x_step_q4, int y0_q4, int y_step_q4, int bd, int y0, int frame_h) {
 	int sm[16];
@@ -1211,26 +1262,20 @@ __device__ static void cuda_dec_build_inter_predictors_horiz(int t_subsampling_x
 #endif
 }
 
-__device__ static void cuda_dec_build_inter_predictors_both(int t_subsampling_x,
-	int t_subsampling_y, int mb_to_top_edge, int mb_to_left_edge, int bit_depth, int x, int y,
-	const InterpKernel* kernel, int buf_stride, uint8_t* dst_buf, int16_t row, int16_t col,
-	uint8_t* ref_frame, int frame_height) {
+__device__ static void cuda_dec_build_inter_predictors_both(int t_subsampling_x, int t_subsampling_y, int mb_to_top_edge, 
+	int mb_to_left_edge, int bit_depth, int x, int y, const InterpKernel* kernel, int buf_stride, uint8_t* dst_buf, int16_t row, 
+	int16_t col, uint8_t* ref_frame, int frame_height) {
 	uint8_t* const dst = dst_buf + buf_stride * y + x;
 	MV32 scaled_mv;
-	int xs, ys, x0, y0, x0_16, y0_16, subpel_x, subpel_y;
+	int x0, y0, subpel_x, subpel_y;
 	uint8_t* buf_ptr;
 
 	// Co-ordinate of containing block to pixel precision.
 	x0 = (-mb_to_left_edge >> (3 + t_subsampling_x)) + x;
 	y0 = (-mb_to_top_edge >> (3 + t_subsampling_y)) + y;
-
-	// Co-ordinate of the block to 1/16th pixel precision.
-	x0_16 = x0 << SUBPEL_BITS;
-	y0_16 = y0 << SUBPEL_BITS;
 	
 	scaled_mv.row = row * (1 << (1 - t_subsampling_y));
 	scaled_mv.col = col * (1 << (1 - t_subsampling_x));
-	xs = ys = 16;
 
 	subpel_x = scaled_mv.col & SUBPEL_MASK;
 	subpel_y = scaled_mv.row & SUBPEL_MASK;
@@ -1239,17 +1284,17 @@ __device__ static void cuda_dec_build_inter_predictors_both(int t_subsampling_x,
 	// reference frame.
 	x0 += scaled_mv.col >> SUBPEL_BITS;
 	y0 += scaled_mv.row >> SUBPEL_BITS;
-	x0_16 += scaled_mv.col;
-	y0_16 += scaled_mv.row;
 
 	// Get reference block pointer.
 	buf_ptr = ref_frame + y0 * buf_stride + x0;
 
 #if CONFIG_VP9_HIGHBITDEPTH
 	//cuda_highbd_inter_predictor_both(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride, CONVERT_TO_SHORTPTR(dst), buf_stride, 
-	//	subpel_x, subpel_y, kernel, xs, ys, bit_depth, y0, frame_height);
+	//	subpel_x, subpel_y, kernel, 16, 16, bit_depth, y0, frame_height);
 	both_const_idx(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride, CONVERT_TO_SHORTPTR(dst), buf_stride, kernel, 
-		subpel_x, xs, subpel_y, ys, bit_depth, y0, frame_height);
+		subpel_x, 16, subpel_y, 16, bit_depth, y0, frame_height);
+	//shared_convolve(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride, CONVERT_TO_SHORTPTR(dst), buf_stride, kernel,
+	//	subpel_x, 16, subpel_y, 16, bit_depth, y0, frame_height);
 #else
 	cuda_highbd_inter_predictor(buf_ptr, buf_stride, dst, buf_stride, subpel_x,
 		subpel_y, sf, w, h, ref, kernel, xs, ys, bit_depth);
@@ -1445,42 +1490,32 @@ __device__ static void cuda_dec_build_inter_predictors_4x4_horiz(FrameInformatio
 }
 
 __device__ static void cuda_dec_build_inter_predictors_4x4_both(FrameInformation* fi, int subsampling_x,
-	int subsampling_y, int interp_filter, MV_REFERENCE_FRAME ref_frame, uint8_t* alloc,
-	uint8_t* frame_refs[3], int16_t my, int16_t mx, int mi_row, int mi_col,
+	int subsampling_y, int interp_filter, uint8_t* alloc,
+	uint8_t* ref_alloc, int16_t my, int16_t mx, int mi_row, int mi_col,
 	int plane, int x, int y) {
 
 	uint8_t* y_buf = (uint8_t*)yv12_align_addr(alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
 	uint8_t* u_buf = (uint8_t*)yv12_align_addr(alloc + fi->yplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
 	uint8_t* v_buf = (uint8_t*)yv12_align_addr(alloc + fi->yplane_size + fi->uvplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
-
-	uint8_t* const buffers[MAX_MB_PLANE] = { y_buf, u_buf, v_buf };
-	const int strides[MAX_MB_PLANE] = { fi->y_stride, fi->uv_stride, fi->uv_stride };
+	
+	uint8_t* buffer = (plane == 0 ? y_buf : (plane == 1 ? u_buf : v_buf));
+	int stride = (plane == 0 ? fi->y_stride : fi->uv_stride);
 
 	const InterpKernel* kernel = cuda_vp9_filter_kernels[interp_filter];
 	
-	int k = ref_frame - LAST_FRAME;
-
-	uint8_t* ref_alloc = frame_refs[k];
 	uint8_t* ref_y_buf = (uint8_t*)yv12_align_addr(ref_alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
 	uint8_t* ref_u_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
 	uint8_t* ref_v_buf = (uint8_t*)yv12_align_addr(ref_alloc + fi->yplane_size + fi->uvplane_size + (fi->uv_border_h * fi->uv_stride) + fi->uv_border_w, fi->vp9_byte_align);
-	uint8_t* const ref_buffers[MAX_MB_PLANE] = { ref_y_buf, ref_u_buf, ref_v_buf };
 
-	uint8_t* dst_buf = buffers[plane] + cuda_scaled_buffer_offset((MI_SIZE * mi_col) >> subsampling_x,
-		(MI_SIZE * mi_row) >> subsampling_y, strides[plane], NULL);
+	uint8_t* ref_buffer = (plane == 0 ? ref_y_buf : (plane == 1 ? ref_u_buf : ref_v_buf));
 
-	const int buf_stride = strides[plane];
+	uint8_t* dst_buf = buffer + cuda_scaled_buffer_offset((MI_SIZE * mi_col) >> subsampling_x,
+		(MI_SIZE * mi_row) >> subsampling_y, stride, NULL);
 	
-	int frame_height;
-	uint8_t* ref_frame_buf;
-
-	if (plane == 0) frame_height = fi->y_crop_height;
-	else frame_height = fi->uv_crop_height;
-	
-	ref_frame_buf = ref_buffers[plane];
+	int frame_height = (plane == 0 ? fi->y_crop_height : fi->uv_crop_height);
 
 	cuda_dec_build_inter_predictors_both(subsampling_x, subsampling_y, -(mi_row * MI_SIZE * 8),
-		-(mi_col * MI_SIZE * 8), fi->bit_depth, 4 * x, 4 * y, kernel, buf_stride, dst_buf, my, mx, ref_frame_buf, 
+		-(mi_col * MI_SIZE * 8), fi->bit_depth, 4 * x, 4 * y, kernel, stride, dst_buf, my, mx, ref_buffer,
 		frame_height);
 }
 
@@ -1586,27 +1621,33 @@ __global__ static void cuda_inter_4x4_horiz(uint8_t* alloc, uint8_t* frame_ref1,
 	}
 }
 
-__global__ static void cuda_inter_4x4_both(uint8_t* alloc, uint8_t* frame_ref1, uint8_t* frame_ref2, uint8_t* frame_ref3, FrameInformation* fi,
+__global__ static void cuda_inter_4x4_both(uint8_t* alloc, uint8_t* frame_ref0, uint8_t* frame_ref1, uint8_t* frame_ref2, FrameInformation* fi,
 	int16_t* mv, const int super_size, MV_REFERENCE_FRAME* ref_frame, int* block_settings, int begin)
 {
-#if CONFIG_VP9_HIGHBITDEPTH
-	uint8_t* frame_refs[3] = { CONVERT_TO_BYTEPTR(frame_ref1), CONVERT_TO_BYTEPTR(frame_ref2), CONVERT_TO_BYTEPTR(frame_ref3) };
-#else
-	uint8_t* frame_refs[3] = { frame_ref1, frame_ref2, frame_ref3 };
-#endif
 	unsigned int i = threadIdx.x + blockIdx.x * blockDim.x + begin;
 	uint8_t* converted_alloc = alloc;
 
 #if CONFIG_VP9_HIGHBITDEPTH
 	converted_alloc = CONVERT_TO_BYTEPTR(converted_alloc);
-#endif
 
 	if (i < super_size) {
+		int k = ref_frame[i] - LAST_FRAME;
+		uint8_t* ref_alloc = (k == 0 ? CONVERT_TO_BYTEPTR(frame_ref0) : (k == 1 ? CONVERT_TO_BYTEPTR(frame_ref1) : CONVERT_TO_BYTEPTR(frame_ref2)));
+		
 		cuda_dec_build_inter_predictors_4x4_both(fi, block_settings[9 * i + 5], block_settings[9 * i + 6], block_settings[9 * i + 7],
-			ref_frame[i], converted_alloc, frame_refs, mv[2 * i + 1], mv[2 * i], block_settings[9 * i + 3],
-			block_settings[9 * i + 4], block_settings[9 * i + 2], block_settings[9 * i], block_settings[9 * i + 1]);
-
+			converted_alloc, ref_alloc, mv[2 * i + 1], mv[2 * i], block_settings[9 * i + 3], block_settings[9 * i + 4],
+			block_settings[9 * i + 2], block_settings[9 * i], block_settings[9 * i + 1]);
 	}
+#else
+	if (i < super_size) {
+		int k = ref_frame[i] - LAST_FRAME;
+		uint8_t* ref_alloc = (k == 0 ? frame_ref0 : (k == 1 ? frame_ref1 : frame_ref2));
+
+		cuda_dec_build_inter_predictors_4x4_both(fi, block_settings[9 * i + 5], block_settings[9 * i + 6], block_settings[9 * i + 7],
+			converted_alloc, ref_alloc, mv[2 * i + 1], mv[2 * i], block_settings[9 * i + 3], block_settings[9 * i + 4],
+			block_settings[9 * i + 2], block_settings[9 * i], block_settings[9 * i + 1]);
+	}
+#endif
 }
 
 __host__ void copyFrameInfo(FrameInformation* cd_fi, FrameInformation* fi)
@@ -2114,6 +2155,17 @@ __host__ int checkCompound(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 	return super_size;
 }
 
+void gpuAssert(cudaError_t code, const char* file, int line, bool abort = true)
+{
+	if (code != cudaSuccess)
+	{
+		fprintf(stderr, "GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+		if (abort) exit(code);
+	}
+}
+
+#define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+
 int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_for_mb, ModeInfoBuf* MiBuf,
                           VP9_COMMON* cm, VP9Decoder* pbi, int tile_rows, int tile_cols)
 {
@@ -2166,8 +2218,6 @@ int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_fo
 	clock_t copy_end = clock();
 	*gpu_copy = (double)(copy_end - copy_begin) / CLOCKS_PER_SEC;
 	
-	setFK <<<1, 1>>> ();
-	
 	float elapsed = 0;
 	cudaEvent_t start, stop;
 	
@@ -2195,12 +2245,13 @@ int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_fo
 	cudaDeviceSynchronize();
 
 	super_size = checkCompound(size_for_mb, MiBuf, cm, pbi, tile_rows, tile_cols, host_block_settings, host_ref_frame, host_mv);
-
+	
 	if (super_size > 0)
 	{
 		int blocksPerGrid = MAX(1, (super_size + threadsPerBlock - 1) / threadsPerBlock);
 		cuda_inter_4x4_comp <<<blocksPerGrid, threadsPerBlock>>> (cd_alloc, frame_ref1, frame_ref2, frame_ref3, cd_fi, mv,
 			super_size, ref_frame, block_settings, 0);
+		
 		cudaDeviceSynchronize();
 	}
 	
@@ -2210,8 +2261,6 @@ int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_fo
 	cudaEventDestroy(start);
 	cudaEventDestroy(stop);
 	*gpu_run = ((double)elapsed) / 1000;
-	
-	cudaError err = cudaGetLastError();
 	
 	cudaMemcpy(alloc, cd_alloc, host_fi->size, cudaMemcpyDeviceToHost);
 
@@ -2233,13 +2282,4 @@ int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_fo
 	}
 	
 	return 0;
-}
-
-__global__ void setFK()
-{
-	cuda_vp9_filter_kernels[0] = cuda_sub_pel_filters_8;
-	cuda_vp9_filter_kernels[1] = cuda_sub_pel_filters_8lp;
-	cuda_vp9_filter_kernels[2] = cuda_sub_pel_filters_8s;
-	cuda_vp9_filter_kernels[3] = cuda_bilinear_filters;
-	cuda_vp9_filter_kernels[4] = cuda_sub_pel_filters_4;
 }
