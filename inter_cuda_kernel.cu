@@ -495,55 +495,92 @@ __device__ static void cuda_highbd_convolve_avg_vert(const uint16_t* src, ptrdif
 	}
 }
 
-__device__ static void shared_convolve(const uint16_t* src, ptrdiff_t src_stride, uint16_t* dst, ptrdiff_t dst_stride,
-	const InterpKernel* filter, int x0_q4, int x_step_q4, int y0_q4, int y_step_q4, int bd, int y0, int frame_h) {
-	__shared__ int sm[16 * threadsPerBlock];
-	memset(sm + 16 * threadIdx.x, 0, 16 *  sizeof(int));
+__device__ static void shared_convolve_row(const uint16_t* src, ptrdiff_t src_stride, uint16_t* dst, ptrdiff_t dst_stride,
+	const InterpKernel* filter, int x0_q4, int x_step_q4, int y0_q4, int y_step_q4, int bd, int y0, int frame_h, int x0) {
+	int sm[16];
+	memset(sm, 0, 16 * sizeof(int));
 
-	assert(y_step_q4 <= 32);
-	assert(x_step_q4 <= 32);
-
-	int x, y;
-	const uint16_t* ref_row = src - y0 * src_stride;
-	y0 -= (SUBPEL_TAPS / 2 - 1);
+	int y;
+	const uint16_t* ref_row = src;
 	if (y0 >= frame_h) ref_row += (frame_h - 1) * src_stride;
 	else if (y0 > 0) ref_row += y0 * src_stride;
-	ref_row -= (SUBPEL_TAPS / 2 - 1);
 
+	int st = x0;
+	x0 = x0 & ~1;
+	int delta = st - x0;
+	ref_row += x0;
+	
 	for (y = 0; y < 11; ++y)
 	{
-		int x_q4 = x0_q4;
-		for (x = 0; x < 4; ++x)
-		{
-			const uint16_t* const src_x = &ref_row[x];
-			const int16_t* const x_filter = filter[x_q4 & SUBPEL_MASK];
-			int k, sum = 0;
-			for (k = 0; k < SUBPEL_TAPS; ++k) sum += src_x[k] * x_filter[k];
-			int a = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sum, FILTER_BITS), bd);
-
-			int y_q4 = y0_q4;
-			for (int j = 0; j < 4; ++j)
-			{
-				if (y - j < SUBPEL_TAPS && y >= j)
-				{
-					sm[16 * threadIdx.x + j * 4 + x] += a * filter[y_q4 & SUBPEL_MASK][y - j];
-				}
-				y_q4 += y_step_q4;
-			}
-			x_q4 += x_step_q4;
-		}
+		__shared__ int int_cashe[6 * threadsPerBlock];
+		for(int i = 0; i < 6; ++i) int_cashe[6 * threadIdx.x + i] = ((const int*)ref_row)[i];
+		uint16_t *cashe = (uint16_t*)(int_cashe + 6 * threadIdx.x) + delta;
+		
+		const int16_t* x_filter = filter[x0_q4 & SUBPEL_MASK];
+		int k, sum = 0;
+		for (k = 0; k < SUBPEL_TAPS; ++k) sum += cashe[k] * x_filter[k];
+		int a = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sum, FILTER_BITS), bd);
+		if (y < SUBPEL_TAPS) sm[0] += a * filter[y0_q4 & SUBPEL_MASK][y];
+		if (y - 1 < SUBPEL_TAPS && y >= 1) sm[4] += a * filter[y0_q4 + y_step_q4 & SUBPEL_MASK][y - 1];
+		if (y - 2 < SUBPEL_TAPS && y >= 2) sm[8] += a * filter[y0_q4 + 2 * y_step_q4 & SUBPEL_MASK][y - 2];
+		if (y - 3 < SUBPEL_TAPS && y >= 3) sm[12] += a * filter[y0_q4 + 3 * y_step_q4 & SUBPEL_MASK][y - 3];
+		
+		++cashe;
+		x_filter = filter[x0_q4 + x_step_q4 & SUBPEL_MASK];
+		sum = 0;
+		for (k = 0; k < SUBPEL_TAPS; ++k) sum += cashe[k] * x_filter[k];
+		a = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sum, FILTER_BITS), bd);
+		if (y < SUBPEL_TAPS) sm[1] += a * filter[y0_q4 & SUBPEL_MASK][y];
+		if (y - 1 < SUBPEL_TAPS && y >= 1) sm[5] += a * filter[y0_q4 + y_step_q4 & SUBPEL_MASK][y - 1];
+		if (y - 2 < SUBPEL_TAPS && y >= 2) sm[9] += a * filter[y0_q4 + 2 * y_step_q4 & SUBPEL_MASK][y - 2];
+		if (y - 3 < SUBPEL_TAPS && y >= 3) sm[13] += a * filter[y0_q4 + 3 * y_step_q4 & SUBPEL_MASK][y - 3];
+		
+		++cashe;
+		x_filter = filter[x0_q4 + 2 * x_step_q4 & SUBPEL_MASK];
+		sum = 0;
+		for (k = 0; k < SUBPEL_TAPS; ++k) sum += cashe[k] * x_filter[k];
+		a = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sum, FILTER_BITS), bd);
+		if (y < SUBPEL_TAPS) sm[2] += a * filter[y0_q4 & SUBPEL_MASK][y];
+		if (y - 1 < SUBPEL_TAPS && y >= 1) sm[6] += a * filter[y0_q4 + y_step_q4 & SUBPEL_MASK][y - 1];
+		if (y - 2 < SUBPEL_TAPS && y >= 2) sm[10] += a * filter[y0_q4 + 2 * y_step_q4 & SUBPEL_MASK][y - 2];
+		if (y - 3 < SUBPEL_TAPS && y >= 3) sm[14] += a * filter[y0_q4 + 3 * y_step_q4 & SUBPEL_MASK][y - 3];
+		
+		++cashe;
+		x_filter = filter[x0_q4 + 3 * x_step_q4 & SUBPEL_MASK];
+		sum = 0;
+		for (k = 0; k < SUBPEL_TAPS; ++k) sum += cashe[k] * x_filter[k];
+		a = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sum, FILTER_BITS), bd);
+		if (y < SUBPEL_TAPS) sm[3] += a * filter[y0_q4 & SUBPEL_MASK][y];
+		if (y - 1 < SUBPEL_TAPS && y >= 1) sm[7] += a * filter[y0_q4 + y_step_q4 & SUBPEL_MASK][y - 1];
+		if (y - 2 < SUBPEL_TAPS && y >= 2) sm[11] += a * filter[y0_q4 + 2 * y_step_q4 & SUBPEL_MASK][y - 2];
+		if (y - 3 < SUBPEL_TAPS && y >= 3) sm[15] += a * filter[y0_q4 + 3 * y_step_q4 & SUBPEL_MASK][y - 3];
+		
 		++y0;
 		if (y0 > 0 && y0 < frame_h) ref_row += src_stride;
 	}
 
-	for (x = 0; x < 4; ++x)
-	{
-		for (y = 0; y < 4; ++y)
-		{
-			dst[y * dst_stride] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[16 * threadIdx.x + y * 4 + x], FILTER_BITS), bd);
-		}
-		++dst;
-	}
+	uint16_t* p = (uint16_t*)sm;
+	p[0] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[0], FILTER_BITS), bd);
+	p[1] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[1], FILTER_BITS), bd);
+	p[2] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[2], FILTER_BITS), bd);
+	p[3] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[3], FILTER_BITS), bd);
+	p[4] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[4], FILTER_BITS), bd);
+	p[5] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[5], FILTER_BITS), bd);
+	p[6] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[6], FILTER_BITS), bd);
+	p[7] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[7], FILTER_BITS), bd);
+	p[8] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[8], FILTER_BITS), bd);
+	p[9] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[9], FILTER_BITS), bd);
+	p[10] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[10], FILTER_BITS), bd);
+	p[11] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[11], FILTER_BITS), bd);
+	p[12] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[12], FILTER_BITS), bd);
+	p[13] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[13], FILTER_BITS), bd);
+	p[14] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[14], FILTER_BITS), bd);
+	p[15] = cuda_clip_pixel_highbd(ROUND_POWER_OF_TWO(sm[15], FILTER_BITS), bd);
+	
+	*(long long*)(&dst[0 * dst_stride]) = *(long long*)p;
+	*(long long*)(&dst[1 * dst_stride]) = *(long long*)(&p[4]);
+	*(long long*)(&dst[2 * dst_stride]) = *(long long*)(&p[8]);
+	*(long long*)(&dst[3 * dst_stride]) = *(long long*)(&p[12]);
 }
 
 __device__ static void both_const_idx(const uint16_t* src, ptrdiff_t src_stride, uint16_t* dst, ptrdiff_t dst_stride,
@@ -1262,20 +1299,20 @@ __device__ static void cuda_dec_build_inter_predictors_horiz(int t_subsampling_x
 #endif
 }
 
-__device__ static void cuda_dec_build_inter_predictors_both(int t_subsampling_x, int t_subsampling_y, int mb_to_top_edge, 
+__device__ static void cuda_dec_build_inter_predictors_both(int subsampling, int mb_to_top_edge,
 	int mb_to_left_edge, int bit_depth, int x, int y, const InterpKernel* kernel, int buf_stride, uint8_t* dst_buf, int16_t row, 
 	int16_t col, uint8_t* ref_frame, int frame_height) {
 	uint8_t* const dst = dst_buf + buf_stride * y + x;
 	MV32 scaled_mv;
 	int x0, y0, subpel_x, subpel_y;
-	uint8_t* buf_ptr;
+	//uint8_t* buf_ptr;
 
 	// Co-ordinate of containing block to pixel precision.
-	x0 = (-mb_to_left_edge >> (3 + t_subsampling_x)) + x;
-	y0 = (-mb_to_top_edge >> (3 + t_subsampling_y)) + y;
+	x0 = (-mb_to_left_edge >> (3 + subsampling)) + x;
+	y0 = (-mb_to_top_edge >> (3 + subsampling)) + y;
 	
-	scaled_mv.row = row * (1 << (1 - t_subsampling_y));
-	scaled_mv.col = col * (1 << (1 - t_subsampling_x));
+	scaled_mv.row = row * (1 << (1 - subsampling));
+	scaled_mv.col = col * (1 << (1 - subsampling));
 
 	subpel_x = scaled_mv.col & SUBPEL_MASK;
 	subpel_y = scaled_mv.row & SUBPEL_MASK;
@@ -1286,15 +1323,18 @@ __device__ static void cuda_dec_build_inter_predictors_both(int t_subsampling_x,
 	y0 += scaled_mv.row >> SUBPEL_BITS;
 
 	// Get reference block pointer.
-	buf_ptr = ref_frame + y0 * buf_stride + x0;
+	//buf_ptr = ref_frame + y0 * buf_stride + x0;
 
+	y0 -= (SUBPEL_TAPS / 2 - 1);
+	x0 -= (SUBPEL_TAPS / 2 - 1);
+	
 #if CONFIG_VP9_HIGHBITDEPTH
 	//cuda_highbd_inter_predictor_both(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride, CONVERT_TO_SHORTPTR(dst), buf_stride, 
 	//	subpel_x, subpel_y, kernel, 16, 16, bit_depth, y0, frame_height);
-	both_const_idx(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride, CONVERT_TO_SHORTPTR(dst), buf_stride, kernel, 
-		subpel_x, 16, subpel_y, 16, bit_depth, y0, frame_height);
-	//shared_convolve(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride, CONVERT_TO_SHORTPTR(dst), buf_stride, kernel,
+	//both_const_idx(CONVERT_TO_SHORTPTR(buf_ptr), buf_stride, CONVERT_TO_SHORTPTR(dst), buf_stride, kernel, 
 	//	subpel_x, 16, subpel_y, 16, bit_depth, y0, frame_height);
+	shared_convolve_row(CONVERT_TO_SHORTPTR(ref_frame), buf_stride, CONVERT_TO_SHORTPTR(dst), buf_stride, kernel,
+		subpel_x, 16, subpel_y, 16, bit_depth, y0, frame_height, x0);
 #else
 	cuda_highbd_inter_predictor(buf_ptr, buf_stride, dst, buf_stride, subpel_x,
 		subpel_y, sf, w, h, ref, kernel, xs, ys, bit_depth);
@@ -1489,9 +1529,8 @@ __device__ static void cuda_dec_build_inter_predictors_4x4_horiz(FrameInformatio
 		sf[k], buf_stride, dst_buf, &mv, ref_frame_buf, frame_width, frame_height);
 }
 
-__device__ static void cuda_dec_build_inter_predictors_4x4_both(FrameInformation* fi, int subsampling_x,
-	int subsampling_y, int interp_filter, uint8_t* alloc,
-	uint8_t* ref_alloc, int16_t my, int16_t mx, int mi_row, int mi_col,
+__device__ static void cuda_dec_build_inter_predictors_4x4_both(FrameInformation* fi, int subsampling,
+	int interp_filter, uint8_t* alloc, uint8_t* ref_alloc, int16_t my, int16_t mx, int mi_row, int mi_col,
 	int plane, int x, int y) {
 
 	uint8_t* y_buf = (uint8_t*)yv12_align_addr(alloc + (fi->border * fi->y_stride) + fi->border, fi->vp9_byte_align);
@@ -1509,12 +1548,12 @@ __device__ static void cuda_dec_build_inter_predictors_4x4_both(FrameInformation
 
 	uint8_t* ref_buffer = (plane == 0 ? ref_y_buf : (plane == 1 ? ref_u_buf : ref_v_buf));
 
-	uint8_t* dst_buf = buffer + cuda_scaled_buffer_offset((MI_SIZE * mi_col) >> subsampling_x,
-		(MI_SIZE * mi_row) >> subsampling_y, stride, NULL);
+	uint8_t* dst_buf = buffer + cuda_scaled_buffer_offset((MI_SIZE * mi_col) >> subsampling,
+		(MI_SIZE * mi_row) >> subsampling, stride, NULL);
 	
 	int frame_height = (plane == 0 ? fi->y_crop_height : fi->uv_crop_height);
 
-	cuda_dec_build_inter_predictors_both(subsampling_x, subsampling_y, -(mi_row * MI_SIZE * 8),
+	cuda_dec_build_inter_predictors_both(subsampling, -(mi_row * MI_SIZE * 8),
 		-(mi_col * MI_SIZE * 8), fi->bit_depth, 4 * x, 4 * y, kernel, stride, dst_buf, my, mx, ref_buffer,
 		frame_height);
 }
@@ -1629,14 +1668,20 @@ __global__ static void cuda_inter_4x4_both(uint8_t* alloc, uint8_t* frame_ref0, 
 
 #if CONFIG_VP9_HIGHBITDEPTH
 	converted_alloc = CONVERT_TO_BYTEPTR(converted_alloc);
-
+	
 	if (i < super_size) {
 		int k = ref_frame[i] - LAST_FRAME;
 		uint8_t* ref_alloc = (k == 0 ? CONVERT_TO_BYTEPTR(frame_ref0) : (k == 1 ? CONVERT_TO_BYTEPTR(frame_ref1) : CONVERT_TO_BYTEPTR(frame_ref2)));
+
+		int mvl;
+		memcpy(&mvl, &mv[2 * i], sizeof(int));
+		uint16_t *x, *y;
+		x = (uint16_t*)&mvl;
+		y = (uint16_t*)(&mvl) + 1;
 		
-		cuda_dec_build_inter_predictors_4x4_both(fi, block_settings[9 * i + 5], block_settings[9 * i + 6], block_settings[9 * i + 7],
-			converted_alloc, ref_alloc, mv[2 * i + 1], mv[2 * i], block_settings[9 * i + 3], block_settings[9 * i + 4],
-			block_settings[9 * i + 2], block_settings[9 * i], block_settings[9 * i + 1]);
+		cuda_dec_build_inter_predictors_4x4_both(fi, block_settings[8 * i + 5], block_settings[8 * i + 7],
+			converted_alloc, ref_alloc, *y, *x, block_settings[8 * i + 3], block_settings[8 * i + 4],
+			block_settings[8 * i + 2], block_settings[8 * i], block_settings[8 * i + 1]);
 	}
 #else
 	if (i < super_size) {
@@ -1870,7 +1915,6 @@ __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 											//	host_block_settings[9 * t_copy + 5] = xd->plane[plane].subsampling_x;
 											//	host_block_settings[9 * t_copy + 6] = xd->plane[plane].subsampling_y;
 											//	host_block_settings[9 * t_copy + 7] = MiBuf->mi[0]->interp_filter;
-											//	host_block_settings[9 * t_copy + 8] = has_second_ref(MiBuf->mi[0]);
 											//	host_block_settings[9 * t_copy + 3] = *MiBuf->mi_row;
 											//	host_block_settings[9 * t_copy + 4] = *MiBuf->mi_col;
 											//	host_block_settings[9 * t_copy + 0] = x;
@@ -1887,7 +1931,6 @@ __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 											//	host_block_settings[9 * t_vert + 5] = xd->plane[plane].subsampling_x;
 											//	host_block_settings[9 * t_vert + 6] = xd->plane[plane].subsampling_y;
 											//	host_block_settings[9 * t_vert + 7] = MiBuf->mi[0]->interp_filter;
-											//	host_block_settings[9 * t_vert + 8] = has_second_ref(MiBuf->mi[0]);
 											//	host_block_settings[9 * t_vert + 3] = *MiBuf->mi_row;
 											//	host_block_settings[9 * t_vert + 4] = *MiBuf->mi_col;
 											//	host_block_settings[9 * t_vert + 0] = x;
@@ -1904,7 +1947,6 @@ __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 											//	host_block_settings[9 * t_horiz + 5] = xd->plane[plane].subsampling_x;
 											//	host_block_settings[9 * t_horiz + 6] = xd->plane[plane].subsampling_y;
 											//	host_block_settings[9 * t_horiz + 7] = MiBuf->mi[0]->interp_filter;
-											//	host_block_settings[9 * t_horiz + 8] = has_second_ref(MiBuf->mi[0]);
 											//	host_block_settings[9 * t_horiz + 3] = *MiBuf->mi_row;
 											//	host_block_settings[9 * t_horiz + 4] = *MiBuf->mi_col;
 											//	host_block_settings[9 * t_horiz + 0] = x;
@@ -1918,15 +1960,14 @@ __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 												host_ref_frame[1 * t_both + 0] = MiBuf->mi[0]->ref_frame[0];
 												host_mv[2 * t_both + 0] = MiBuf->mi[0]->mv[0].as_mv.col;
 												host_mv[2 * t_both + 1] = MiBuf->mi[0]->mv[0].as_mv.row;
-												host_block_settings[9 * t_both + 5] = xd->plane[plane].subsampling_x;
-												host_block_settings[9 * t_both + 6] = xd->plane[plane].subsampling_y;
-												host_block_settings[9 * t_both + 7] = MiBuf->mi[0]->interp_filter;
-												host_block_settings[9 * t_both + 8] = has_second_ref(MiBuf->mi[0]);
-												host_block_settings[9 * t_both + 3] = *MiBuf->mi_row;
-												host_block_settings[9 * t_both + 4] = *MiBuf->mi_col;
-												host_block_settings[9 * t_both + 0] = x;
-												host_block_settings[9 * t_both + 1] = y;
-												host_block_settings[9 * t_both + 2] = plane;
+												host_block_settings[8 * t_both + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[8 * t_both + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[8 * t_both + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[8 * t_both + 3] = *MiBuf->mi_row;
+												host_block_settings[8 * t_both + 4] = *MiBuf->mi_col;
+												host_block_settings[8 * t_both + 0] = x;
+												host_block_settings[8 * t_both + 1] = y;
+												host_block_settings[8 * t_both + 2] = plane;
 
 												++t_both;
 											//}
@@ -1953,7 +1994,6 @@ __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 									//			host_block_settings[9 * t_copy + 5] = xd->plane[plane].subsampling_x;
 									//			host_block_settings[9 * t_copy + 6] = xd->plane[plane].subsampling_y;
 									//			host_block_settings[9 * t_copy + 7] = MiBuf->mi[0]->interp_filter;
-									//			host_block_settings[9 * t_copy + 8] = has_second_ref(MiBuf->mi[0]);
 									//			host_block_settings[9 * t_copy + 3] = *MiBuf->mi_row;
 									//			host_block_settings[9 * t_copy + 4] = *MiBuf->mi_col;
 									//			host_block_settings[9 * t_copy + 0] = x;
@@ -1974,7 +2014,6 @@ __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 									//			host_block_settings[9 * t_vert + 5] = xd->plane[plane].subsampling_x;
 									//			host_block_settings[9 * t_vert + 6] = xd->plane[plane].subsampling_y;
 									//			host_block_settings[9 * t_vert + 7] = MiBuf->mi[0]->interp_filter;
-									//			host_block_settings[9 * t_vert + 8] = has_second_ref(MiBuf->mi[0]);
 									//			host_block_settings[9 * t_vert + 3] = *MiBuf->mi_row;
 									//			host_block_settings[9 * t_vert + 4] = *MiBuf->mi_col;
 									//			host_block_settings[9 * t_vert + 0] = x;
@@ -1995,7 +2034,6 @@ __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 									//			host_block_settings[9 * t_horiz + 5] = xd->plane[plane].subsampling_x;
 									//			host_block_settings[9 * t_horiz + 6] = xd->plane[plane].subsampling_y;
 									//			host_block_settings[9 * t_horiz + 7] = MiBuf->mi[0]->interp_filter;
-									//			host_block_settings[9 * t_horiz + 8] = has_second_ref(MiBuf->mi[0]);
 									//			host_block_settings[9 * t_horiz + 3] = *MiBuf->mi_row;
 									//			host_block_settings[9 * t_horiz + 4] = *MiBuf->mi_col;
 									//			host_block_settings[9 * t_horiz + 0] = x;
@@ -2013,15 +2051,14 @@ __host__ int createBuffers(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 												host_ref_frame[1 * t_both + 0] = MiBuf->mi[0]->ref_frame[0];
 												host_mv[2 * t_both + 0] = MiBuf->mi[0]->mv[0].as_mv.col;
 												host_mv[2 * t_both + 1] = MiBuf->mi[0]->mv[0].as_mv.row;
-												host_block_settings[9 * t_both + 5] = xd->plane[plane].subsampling_x;
-												host_block_settings[9 * t_both + 6] = xd->plane[plane].subsampling_y;
-												host_block_settings[9 * t_both + 7] = MiBuf->mi[0]->interp_filter;
-												host_block_settings[9 * t_both + 8] = has_second_ref(MiBuf->mi[0]);
-												host_block_settings[9 * t_both + 3] = *MiBuf->mi_row;
-												host_block_settings[9 * t_both + 4] = *MiBuf->mi_col;
-												host_block_settings[9 * t_both + 0] = x;
-												host_block_settings[9 * t_both + 1] = y;
-												host_block_settings[9 * t_both + 2] = plane;
+												host_block_settings[8 * t_both + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[8 * t_both + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[8 * t_both + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[8 * t_both + 3] = *MiBuf->mi_row;
+												host_block_settings[8 * t_both + 4] = *MiBuf->mi_col;
+												host_block_settings[8 * t_both + 0] = x;
+												host_block_settings[8 * t_both + 1] = y;
+												host_block_settings[8 * t_both + 2] = plane;
 
 												++super_size;
 												++t_both;
@@ -2092,15 +2129,14 @@ __host__ int checkCompound(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 												host_ref_frame[1 * super_size + 0] = MiBuf->mi[0]->ref_frame[1];
 												host_mv[2 * super_size + 0] = MiBuf->mi[0]->mv[1].as_mv.col;
 												host_mv[2 * super_size + 1] = MiBuf->mi[0]->mv[1].as_mv.row;
-												host_block_settings[9 * super_size + 5] = xd->plane[plane].subsampling_x;
-												host_block_settings[9 * super_size + 6] = xd->plane[plane].subsampling_y;
-												host_block_settings[9 * super_size + 7] = MiBuf->mi[0]->interp_filter;
-												host_block_settings[9 * super_size + 8] = has_second_ref(MiBuf->mi[0]);
-												host_block_settings[9 * super_size + 3] = *MiBuf->mi_row;
-												host_block_settings[9 * super_size + 4] = *MiBuf->mi_col;
-												host_block_settings[9 * super_size + 0] = x;
-												host_block_settings[9 * super_size + 1] = y;
-												host_block_settings[9 * super_size + 2] = plane;
+												host_block_settings[8 * super_size + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[8 * super_size + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[8 * super_size + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[8 * super_size + 3] = *MiBuf->mi_row;
+												host_block_settings[8 * super_size + 4] = *MiBuf->mi_col;
+												host_block_settings[8 * super_size + 0] = x;
+												host_block_settings[8 * super_size + 1] = y;
+												host_block_settings[8 * super_size + 2] = plane;
 
 												++super_size;
 
@@ -2122,15 +2158,14 @@ __host__ int checkCompound(int* size_for_mb, ModeInfoBuf* MiBuf, VP9_COMMON* cm,
 												host_ref_frame[1 * super_size + 0] = MiBuf->mi[0]->ref_frame[1];
 												host_mv[2 * super_size + 0] = MiBuf->mi[0]->mv[1].as_mv.col;
 												host_mv[2 * super_size + 1] = MiBuf->mi[0]->mv[1].as_mv.row;
-												host_block_settings[9 * super_size + 5] = xd->plane[plane].subsampling_x;
-												host_block_settings[9 * super_size + 6] = xd->plane[plane].subsampling_y;
-												host_block_settings[9 * super_size + 7] = MiBuf->mi[0]->interp_filter;
-												host_block_settings[9 * super_size + 8] = has_second_ref(MiBuf->mi[0]);
-												host_block_settings[9 * super_size + 3] = *MiBuf->mi_row;
-												host_block_settings[9 * super_size + 4] = *MiBuf->mi_col;
-												host_block_settings[9 * super_size + 0] = x;
-												host_block_settings[9 * super_size + 1] = y;
-												host_block_settings[9 * super_size + 2] = plane;
+												host_block_settings[8 * super_size + 5] = xd->plane[plane].subsampling_x;
+												host_block_settings[8 * super_size + 6] = xd->plane[plane].subsampling_y;
+												host_block_settings[8 * super_size + 7] = MiBuf->mi[0]->interp_filter;
+												host_block_settings[8 * super_size + 3] = *MiBuf->mi_row;
+												host_block_settings[8 * super_size + 4] = *MiBuf->mi_col;
+												host_block_settings[8 * super_size + 0] = x;
+												host_block_settings[8 * super_size + 1] = y;
+												host_block_settings[8 * super_size + 2] = plane;
 
 												++super_size;
 											}
@@ -2184,7 +2219,7 @@ int cuda_inter_prediction(int n, double* gpu_copy, double* gpu_run, int* size_fo
 	uint8_t* frame_refs[3] = { cm->frame_refs[0].buf->buffer_alloc, cm->frame_refs[1].buf->buffer_alloc, cm->frame_refs[2].buf->buffer_alloc };
 	uint8_t* alloc = cm->buffer_pool->frame_bufs[cm->new_fb_idx].buf.buffer_alloc;
 	
-	cudaHostAlloc((void**)&host_block_settings, 27 * n / 16 * sizeof(int), cudaHostAllocWriteCombined | cudaHostAllocMapped);
+	cudaHostAlloc((void**)&host_block_settings, 24 * n / 16 * sizeof(int), cudaHostAllocWriteCombined | cudaHostAllocMapped);
 	cudaHostAlloc((void**)&host_fi, sizeof(FrameInformation), cudaHostAllocWriteCombined | cudaHostAllocMapped);
 	cudaHostAlloc((void**)&host_mv, 6 * n / 16 * sizeof(int16_t), cudaHostAllocWriteCombined | cudaHostAllocMapped);
 	cudaHostAlloc((void**)&host_ref_frame, 3 * n / 16 * sizeof(MV_REFERENCE_FRAME),cudaHostAllocWriteCombined | cudaHostAllocMapped);
